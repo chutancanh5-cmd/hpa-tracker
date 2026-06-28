@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0f7b46">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="HPA">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<title>HPA · Sổ đầu tư</title>
+</head>
+<body>
+<div id="app">
+  <!-- Header -->
+  <header class="topbar">
+    <div class="tb-left">
+      <div class="tb-symbol">HPA</div>
+      <div class="tb-name" id="tbName">Nông nghiệp Hòa Phát</div>
+    </div>
+    <div class="tb-right">
+      <div class="tb-price" id="tbPrice">—</div>
+      <div class="tb-change" id="tbChange">—</div>
+    </div>
+  </header>
+  <div class="updated" id="updated"></div>
+
+  <!-- ============ TAB: TỔNG QUAN ============ -->
+  <section class="tab" id="tab-overview">
+    <div class="card hero" id="heroCard">
+      <div class="hero-label">Tổng tài sản (giá hiện tại)</div>
+      <div class="hero-value" id="heroValue">—</div>
+      <div class="hero-sub" id="heroSub"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card stat"><div class="stat-label">Vốn đang đầu tư</div><div class="stat-val" id="sInvested">—</div><div class="stat-sub" id="sQty"></div></div>
+      <div class="card stat"><div class="stat-label">Giá vốn TB</div><div class="stat-val" id="sAvg">—</div><div class="stat-sub" id="sAvgSub"></div></div>
+      <div class="card stat"><div class="stat-label">Lãi/lỗ tạm tính</div><div class="stat-val" id="sUnreal">—</div><div class="stat-sub" id="sUnrealPct"></div></div>
+      <div class="card stat"><div class="stat-label">Lãi/lỗ đã chốt</div><div class="stat-val" id="sReal">—</div><div class="stat-sub">đã bán</div></div>
+      <div class="card stat"><div class="stat-label">Cổ tức đã nhận</div><div class="stat-val" id="sDiv">—</div><div class="stat-sub" id="sDivSub"></div></div>
+      <div class="card stat"><div class="stat-label">Tổng lời/lỗ</div><div class="stat-val" id="sTotal">—</div><div class="stat-sub" id="sTotalPct"></div></div>
+    </div>
+
+    <div class="card" id="emptyHint" style="display:none">
+      <p class="muted">Chưa có giao dịch nào. Bấm tab <b>Giao dịch</b> để nhập lệnh mua/bán đầu tiên của bạn.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Phân tích nhanh</div>
+      <div id="quickFacts" class="facts"></div>
+    </div>
+  </section>
+
+  <!-- ============ TAB: GIAO DỊCH ============ -->
+  <section class="tab" id="tab-trades" hidden>
+    <div class="card">
+      <div class="card-title">Nhập lệnh đã giao dịch</div>
+      <form id="txForm" class="txform">
+        <div class="seg" id="txTypeSeg">
+          <button type="button" class="seg-btn active" data-type="buy">MUA</button>
+          <button type="button" class="seg-btn" data-type="sell">BÁN</button>
+        </div>
+        <label>Ngày giao dịch
+          <input type="date" id="txDate" required>
+        </label>
+        <div class="row2">
+          <label>Số lượng (CP)
+            <input type="number" id="txQty" inputmode="numeric" min="1" step="1" placeholder="vd 1000" required>
+          </label>
+          <label>Giá khớp (đ/CP)
+            <input type="number" id="txPrice" inputmode="decimal" min="0" step="10" placeholder="vd 33800" required>
+          </label>
+        </div>
+        <label class="feewrap">Phí + thuế (đ) <span class="muted" id="feeHint"></span>
+          <input type="number" id="txFee" inputmode="numeric" min="0" step="1" placeholder="tự tính nếu để trống">
+        </label>
+        <button type="submit" class="btn-primary" id="txSubmit">Thêm lệnh MUA</button>
+        <button type="button" class="btn-ghost" id="txCancel" style="display:none">Hủy sửa</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Lịch sử giao dịch <span class="muted" id="txCount"></span></div>
+      <div id="txList" class="txlist"></div>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>Cài đặt phí &amp; thuế</summary>
+        <div class="row2" style="margin-top:10px">
+          <label>Phí mua (%)<input type="number" id="setFeeBuy" step="0.001" min="0"></label>
+          <label>Phí bán (%)<input type="number" id="setFeeSell" step="0.001" min="0"></label>
+        </div>
+        <div class="row2">
+          <label>Thuế bán (%)<input type="number" id="setTaxSell" step="0.01" min="0"></label>
+          <label>Thuế cổ tức (%)<input type="number" id="setTaxDiv" step="0.1" min="0"></label>
+        </div>
+        <button type="button" class="btn-ghost" id="saveSettings">Lưu cài đặt</button>
+        <p class="muted small">Mặc định VN: phí ~0.15%, thuế bán 0.1%, thuế cổ tức tiền mặt 5%.</p>
+      </details>
+      <details>
+        <summary>Sao lưu / Khôi phục dữ liệu</summary>
+        <div style="margin-top:10px">
+          <button type="button" class="btn-ghost" id="exportBtn">Xuất sổ giao dịch (.json)</button>
+          <button type="button" class="btn-ghost" id="importBtn">Nhập từ file</button>
+          <input type="file" id="importFile" accept="application/json" hidden>
+          <p class="muted small">Sổ giao dịch lưu trên chính điện thoại này. Hãy xuất file để sao lưu định kỳ.</p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============ TAB: CỔ TỨC ============ -->
+  <section class="tab" id="tab-div" hidden>
+    <div class="card hero green">
+      <div class="hero-label">Tổng cổ tức tiền mặt đã nhận (sau thuế)</div>
+      <div class="hero-value" id="divTotal">—</div>
+      <div class="hero-sub" id="divTotalSub"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Từng đợt cổ tức</div>
+      <div id="divList" class="divlist"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Lịch trả cổ tức HPA</div>
+      <p class="muted small">Cổ tức tiền mặt theo năm tài chính. App tự cộng cổ tức cho số CP bạn nắm giữ <b>trước ngày GDKHQ</b> (ex-date).</p>
+      <div id="divSchedule" class="schedule"></div>
+    </div>
+  </section>
+
+  <!-- ============ TAB: CƠ BẢN ============ -->
+  <section class="tab" id="tab-fund" hidden>
+    <div class="card">
+      <div class="card-title">Chỉ số cơ bản HPA</div>
+      <div id="fundGrid" class="fundgrid"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">So sánh cùng ngành (Nông–Lâm–Ngư)</div>
+      <div class="tablewrap"><table id="peerTable" class="peer"></table></div>
+      <p class="muted small" id="peerNote"></p>
+    </div>
+    <div class="card">
+      <div class="card-title">Hồ sơ doanh nghiệp</div>
+      <p class="profile" id="profile"></p>
+    </div>
+  </section>
+
+  <!-- ============ TAB: BIỂU ĐỒ ============ -->
+  <section class="tab" id="tab-chart" hidden>
+    <div class="card">
+      <div class="card-title">Giá đóng cửa
+        <span class="seg small" id="adjSeg" style="float:right">
+          <button type="button" class="seg-btn active" data-adj="raw">Giá thật</button>
+          <button type="button" class="seg-btn" data-adj="adj">Điều chỉnh cổ tức</button>
+        </span>
+      </div>
+      <div id="priceChart" class="chart"></div>
+      <div id="chartLegend" class="legend"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Chu kỳ &amp; biến động</div>
+      <div id="cycleGrid" class="fundgrid"></div>
+      <p class="muted small" id="cycleNote"></p>
+    </div>
+    <div class="card" id="myTradesOnChart">
+      <div class="card-title">Vị thế của bạn trên biểu đồ</div>
+      <div id="posChart" class="chart"></div>
+      <p class="muted small">Đường ngang = giá vốn TB. Chấm = điểm mua/bán của bạn.</p>
+    </div>
+  </section>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <nav class="tabbar">
+    <button class="tab-btn active" data-tab="overview"><span class="ic">📊</span>Tổng quan</button>
+    <button class="tab-btn" data-tab="trades"><span class="ic">📝</span>Giao dịch</button>
+    <button class="tab-btn" data-tab="div"><span class="ic">💰</span>Cổ tức</button>
+    <button class="tab-btn" data-tab="fund"><span class="ic">📈</span>Cơ bản</button>
+    <button class="tab-btn" data-tab="chart"><span class="ic">🕯️</span>Biểu đồ</button>
+  </nav>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
