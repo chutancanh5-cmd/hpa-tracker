@@ -5,7 +5,7 @@ const KEY_TX = 'hpa_tx_v1';
 const KEY_SET = 'hpa_settings_v1';
 const KEY_DATA = 'hpa_data_cache_v1';
 
-const DEFAULT_SETTINGS = { feeBuy: 0.15, feeSell: 0.15, taxSell: 0.10, taxDiv: 5.0 };
+const DEFAULT_SETTINGS = { feeBuy: 0.15, feeSell: 0.15, taxSell: 0.10, taxDiv: 5.0, adjustCostByDiv: true };
 
 let DATA = null;        // dữ liệu thị trường (từ data/hpa.json)
 let TX = [];            // giao dịch của người dùng
@@ -74,52 +74,56 @@ function sortedTx() {
   return [...TX].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-function computePortfolio() {
-  let qty = 0, cost = 0, realized = 0, buyCostSum = 0, sellProceeds = 0;
-  for (const t of sortedTx()) {
-    const fee = txFee(t);
-    if (t.type === 'buy') {
-      cost += t.qty * t.price + fee; qty += t.qty; buyCostSum += t.qty * t.price + fee;
+function computePortfolio(adjustOverride) {
+  const adjust = (adjustOverride != null) ? adjustOverride : (SETTINGS.adjustCostByDiv !== false);
+  const tDay = today();
+  // Gộp giao dịch + cổ tức, xử lý theo trình tự thời gian.
+  // Cổ tức (ord 0) xử lý TRƯỚC giao dịch (ord 1) cùng ngày: mua đúng ngày GDKHQ không được cổ tức.
+  const events = [];
+  for (const t of TX) events.push({ date: t.date, ord: 1, tx: t });
+  for (const d of (DATA?.dividends || [])) if (d.ex_date && d.value) events.push({ date: d.ex_date, ord: 0, div: d });
+  events.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.ord - b.ord);
+
+  let qty = 0, cost = 0, rawCost = 0, realized = 0, buyCostSum = 0, sellProceeds = 0;
+  const div = { detail: [], grossReceived: 0, netReceived: 0, grossUpcoming: 0, netUpcoming: 0 };
+
+  for (const ev of events) {
+    if (ev.tx) {
+      const t = ev.tx, fee = txFee(t), val = t.qty * t.price + fee;
+      if (t.type === 'buy') {
+        cost += val; rawCost += val; qty += t.qty; buyCostSum += val;
+      } else {
+        const avg = qty > 0 ? cost / qty : 0, ravg = qty > 0 ? rawCost / qty : 0;
+        const proceeds = t.qty * t.price - fee;
+        realized += proceeds - t.qty * avg;
+        cost -= t.qty * avg; rawCost -= t.qty * ravg; qty -= t.qty; sellProceeds += proceeds;
+        if (qty < 1e-6) { qty = 0; cost = 0; rawCost = 0; }
+      }
     } else {
-      const avg = qty > 0 ? cost / qty : 0;
-      const proceeds = t.qty * t.price - fee;
-      realized += proceeds - t.qty * avg;
-      cost -= t.qty * avg; qty -= t.qty; sellProceeds += proceeds;
-      if (qty < 1e-6) { qty = 0; cost = 0; }
+      const d = ev.div, shares = qty;           // số CP nắm giữ TRƯỚC ngày GDKHQ
+      if (shares > 0) {
+        const gross = shares * d.value, net = Math.round(gross * (1 - SETTINGS.taxDiv / 100));
+        const entitled = d.ex_date <= tDay;     // đã chốt quyền
+        const paid = d.pay_date ? d.pay_date <= tDay : entitled;
+        div.detail.push({ ...d, shares, gross, net, paid });
+        if (entitled) {
+          div.grossReceived += gross; div.netReceived += net;
+          if (adjust) cost -= net;              // trừ cổ tức vào giá vốn (giống công ty CK)
+        } else { div.grossUpcoming += gross; div.netUpcoming += net; }
+      }
     }
   }
   const price = DATA?.current_price || 0;
   const avgCost = qty > 0 ? cost / qty : 0;
+  const rawAvgCost = qty > 0 ? rawCost / qty : 0;
   const marketValue = qty * price;
   const unreal = marketValue - cost;
-  const div = computeDividends();
-  const totalReturn = realized + unreal + div.netReceived;
+  // Tổng lời/lỗ GIỐNG NHAU ở cả 2 chế độ; chỉ khác cách phân bổ cổ tức vào giá vốn hay tách riêng.
+  const totalReturn = adjust ? (realized + unreal) : (realized + unreal + div.netReceived);
   const roi = buyCostSum > 0 ? totalReturn / buyCostSum * 100 : 0;
-  return { qty, avgCost, cost, marketValue, unreal,
-           unrealPct: cost > 0 ? unreal / cost * 100 : 0,
-           realized, buyCostSum, sellProceeds, div, totalReturn, roi, price };
-}
-
-function netSharesBefore(dateStr) {
-  let q = 0;
-  for (const t of TX) if (t.date < dateStr) q += (t.type === 'buy' ? t.qty : -t.qty);
-  return Math.max(0, q);
-}
-
-function computeDividends() {
-  const out = { detail: [], grossReceived: 0, netReceived: 0, grossUpcoming: 0, netUpcoming: 0 };
-  const divs = (DATA?.dividends || []).filter(d => d.ex_date && d.value);
-  for (const d of divs) {
-    const shares = netSharesBefore(d.ex_date);
-    if (shares <= 0) continue;
-    const gross = shares * d.value;
-    const net = Math.round(gross * (1 - SETTINGS.taxDiv / 100));
-    const paid = d.pay_date && d.pay_date <= today();
-    out.detail.push({ ...d, shares, gross, net, paid });
-    if (paid) { out.grossReceived += gross; out.netReceived += net; }
-    else { out.grossUpcoming += gross; out.netUpcoming += net; }
-  }
-  return out;
+  return { qty, avgCost, rawAvgCost, cost, rawCost, marketValue, unreal,
+           unrealPct: cost !== 0 ? unreal / Math.abs(cost) * 100 : 0,
+           realized, buyCostSum, sellProceeds, div, totalReturn, roi, price, adjust };
 }
 
 /* ===================== Render ===================== */
@@ -148,12 +152,15 @@ function renderOverview() {
   $('sInvested').textContent = money(p.cost);
   $('sQty').textContent = p.qty ? p.qty.toLocaleString('vi-VN') + ' CP' : '';
   $('sAvg').textContent = p.qty ? vnd(p.avgCost) : '—';
-  $('sAvgSub').textContent = p.qty ? `hiện ${vnd(p.price)}` : '';
+  $('sAvgSub').textContent = !p.qty ? ''
+    : (p.adjust && p.div.netReceived > 0) ? `gốc ${vnd(p.rawAvgCost)} · đã trừ cổ tức`
+    : `hiện ${vnd(p.price)}`;
 
   setStat('sUnreal', p.unreal, money); $('sUnrealPct').textContent = p.qty ? signed(x => pct(x), p.unrealPct) : '';
   setStat('sReal', p.realized, money);
   $('sDiv').textContent = money(p.div.netReceived); $('sDiv').className = 'stat-val ' + (p.div.netReceived > 0 ? 'pos' : '');
-  $('sDivSub').textContent = p.div.netUpcoming > 0 ? 'sắp nhận ' + money(p.div.netUpcoming) : 'sau thuế';
+  $('sDivSub').textContent = p.div.netUpcoming > 0 ? 'sắp nhận ' + money(p.div.netUpcoming)
+    : (p.adjust && p.div.netReceived > 0) ? 'đã trừ vào giá vốn' : 'sau thuế';
   setStat('sTotal', p.totalReturn, money); $('sTotalPct').textContent = p.buyCostSum ? signed(x => pct(x), p.roi) : '';
 
   // facts
@@ -193,12 +200,16 @@ function renderTrades() {
   $('feeHint').textContent = `(tự tính ~${txType === 'buy' ? SETTINGS.feeBuy : (SETTINGS.feeSell + SETTINGS.taxSell)}%)`;
   $('setFeeBuy').value = SETTINGS.feeBuy; $('setFeeSell').value = SETTINGS.feeSell;
   $('setTaxSell').value = SETTINGS.taxSell; $('setTaxDiv').value = SETTINGS.taxDiv;
+  $('setAdjustDiv').checked = SETTINGS.adjustCostByDiv !== false;
 }
 
 function renderDividends() {
-  const d = computeDividends();
+  const p = computePortfolio();
+  const d = p.div;
   $('divTotal').textContent = money(d.netReceived);
-  $('divTotalSub').textContent = d.grossReceived ? `Trước thuế ${money(d.grossReceived)} · thuế ${SETTINGS.taxDiv}%` : 'Chưa nhận cổ tức nào';
+  $('divTotalSub').textContent = d.grossReceived
+    ? `Trước thuế ${money(d.grossReceived)} · thuế ${SETTINGS.taxDiv}%${p.adjust ? ' · đã trừ vào giá vốn' : ''}`
+    : 'Chưa nhận cổ tức nào';
   const dl = $('divList');
   if (!d.detail.length) dl.innerHTML = '<p class="muted small">Bạn chưa nắm giữ CP vào kỳ chốt quyền nào. Nhập lệnh mua để app tự tính.</p>';
   else dl.innerHTML = d.detail.map(x => `<div class="dv">
@@ -413,7 +424,8 @@ async function init() {
   };
   $('saveSettings').onclick = () => {
     SETTINGS = { feeBuy: +$('setFeeBuy').value, feeSell: +$('setFeeSell').value,
-                 taxSell: +$('setTaxSell').value, taxDiv: +$('setTaxDiv').value };
+                 taxSell: +$('setTaxSell').value, taxDiv: +$('setTaxDiv').value,
+                 adjustCostByDiv: $('setAdjustDiv').checked };
     saveSettings(); renderAll(); alert('Đã lưu cài đặt.');
   };
   $('exportBtn').onclick = exportData;
