@@ -1,2 +1,13 @@
+# Updater chỉ CẦN 2 gói này (base vnstock + pandas):
 vnstock>=4.0.3
 pandas
+
+# --- Gói PREMIUM của vnstock (tùy chọn) ---
+# Cài qua Vnstock Installer hoặc pip. Khi đã đăng ký key trả phí, tier tự lên "golden"
+# (500 req/phút) và áp dụng cho CẢ base vnstock trong updater — không cần đổi code.
+# vnstock_data
+# vnstock_ta
+# vnstock_news
+# vnstock_pipeline
+# Thư viện phụ mà các gói premium cần (nếu thiếu sẽ lỗi import):
+#   unidecode  html2text  scipy>=1.14.0  websockets>=12.0
