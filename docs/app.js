@@ -175,6 +175,7 @@ function renderOverview() {
     ['Cách đỉnh 1 năm', DATA.cycle?.from_high_pct != null ? pct(DATA.cycle.from_high_pct, 1) : '—'],
   ];
   $('quickFacts').innerHTML = facts.map(([k, v]) => `<div class="fact"><span class="muted">${k}</span><b>${v}</b></div>`).join('');
+  renderEquity();
 }
 function setStat(id, n, fn) { const e = $(id); e.textContent = signed(fn, n); e.className = 'stat-val ' + cls(n); }
 
@@ -201,6 +202,7 @@ function renderTrades() {
   $('setFeeBuy').value = SETTINGS.feeBuy; $('setFeeSell').value = SETTINGS.feeSell;
   $('setTaxSell').value = SETTINGS.taxSell; $('setTaxDiv').value = SETTINGS.taxDiv;
   $('setAdjustDiv').checked = SETTINGS.adjustCostByDiv !== false;
+  renderBreakeven();
 }
 
 function renderDividends() {
@@ -223,6 +225,7 @@ function renderDividends() {
       <div class="dv-l"><b>${x.year || '—'}</b> &nbsp;<span class="muted small">GDKHQ ${x.ex_date || '—'}${x.pay_date ? ' · trả ' + x.pay_date : ''}</span></div>
       <div class="dv-r"><b>${vnd(x.value)}</b>${x.ratio ? `<div class="muted small">tỷ lệ ${(x.ratio * 100).toFixed(1)}%</div>` : ''}</div>
     </div>`).join('');
+  renderNews();
 }
 
 function renderFundamentals() {
@@ -257,6 +260,7 @@ function renderFundamentals() {
 }
 
 function renderChart() {
+  renderBenchmark();
   const series = adjMode === 'adj'
     ? (DATA.adj_history || []).map(d => ({ t: d.t, c: d.c }))
     : (DATA.price_history || []).map(d => ({ t: d.t, c: d.c }));
@@ -328,6 +332,174 @@ function lineChartSVG(data, opts = {}) {
     <text x="${padL}" y="${padT + 2}" font-size="10" fill="#7a8794">${lab(hi)}</text>
     <text x="${padL}" y="${H - padB}" font-size="10" fill="#7a8794">${lab(lo)}</text>
   </svg>`;
+}
+
+/* ---------- Nhiều đường (HPA vs VN-Index vs Ngành), rebase 100 ---------- */
+function multiLineSVG(dates, lines) {
+  const valid = lines.flatMap(l => l.vals).filter(v => v != null);
+  if (!dates.length || !valid.length) return '<p class="muted small">Chưa có dữ liệu.</p>';
+  const W = 520, H = 210, padL = 8, padR = 8, padT = 12, padB = 22;
+  let lo = Math.min(...valid), hi = Math.max(...valid);
+  const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+  const n = dates.length;
+  const X = i => padL + (i / (n - 1 || 1)) * (W - padL - padR);
+  const Y = v => padT + (1 - (v - lo) / (hi - lo || 1)) * (H - padT - padB);
+  const y100 = Y(100).toFixed(1);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<line x1="${padL}" y1="${y100}" x2="${W - padR}" y2="${y100}" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>`;
+  svg += `<text x="${padL}" y="${(+y100 - 3)}" font-size="9" fill="#7a8794">100 (lúc bạn bắt đầu xem)</text>`;
+  for (const l of lines) {
+    let d = '', started = false;
+    l.vals.forEach((v, i) => { if (v == null) return; d += (started ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1); started = true; });
+    svg += `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="${l.w || 2}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  svg += `<text x="${padL}" y="${H - 6}" font-size="10" fill="#7a8794">${dates[0]}</text>`;
+  svg += `<text x="${W - padR}" y="${H - 6}" text-anchor="end" font-size="10" fill="#7a8794">${dates[n - 1]}</text>`;
+  return svg + '</svg>';
+}
+
+function renderBenchmark() {
+  const b = DATA.benchmark;
+  if (!b || !(b.dates || []).length) { $('benchChart').innerHTML = '<p class="muted small">Chưa có dữ liệu so sánh.</p>'; $('benchLegend').innerHTML = ''; $('benchNote').textContent = ''; return; }
+  const lines = [
+    { name: 'HPA', color: '#0f7b46', vals: b.hpa, w: 2.4 },
+    { name: 'VN-Index', color: '#8a97a3', vals: b.vnindex },
+    { name: 'Ngành', color: '#e08a00', vals: b.industry },
+  ];
+  $('benchChart').innerHTML = multiLineSVG(b.dates, lines);
+  const endPct = v => (v != null) ? signed(x => x.toFixed(1) + '%', v - 100) : '—';
+  $('benchLegend').innerHTML = lines.map(l =>
+    `<span style="color:${l.color}"><b style="display:inline-block;width:10px;height:3px;background:${l.color};border-radius:2px;vertical-align:middle;margin-right:5px"></b>${l.name} ${endPct(l.vals[l.vals.length - 1])}</span>`).join('');
+  const hpaEnd = b.hpa[b.hpa.length - 1], indEnd = b.industry[b.industry.length - 1];
+  const diff = (hpaEnd != null && indEnd != null) ? (hpaEnd - indEnd) : null;
+  $('benchNote').textContent = `Rebase 100 từ phiên đầu (${b.dates[0]}). ` +
+    (diff != null ? (diff < 0 ? `HPA đang thua ngành ${Math.abs(diff).toFixed(1)} điểm %.` : `HPA đang thắng ngành ${diff.toFixed(1)} điểm %.`) : '') +
+    ` Chỉ số ngành = bình quân đều ${b.n_peers} mã cùng ngành.`;
+}
+
+/* ---------- Lãi/lỗ tích lũy theo thời gian ---------- */
+function equitySeries() {
+  const adjust = SETTINGS.adjustCostByDiv !== false;
+  const hist = DATA.price_history || [];
+  if (!TX.length || !hist.length) return [];
+  const evs = [];
+  for (const t of TX) evs.push({ date: t.date, ord: 1, tx: t });
+  for (const d of (DATA.dividends || [])) if (d.ex_date && d.value) evs.push({ date: d.ex_date, ord: 0, div: d });
+  evs.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.ord - b.ord);
+  let qty = 0, cost = 0, realized = 0, divNet = 0, ei = 0, started = false;
+  const out = [];
+  for (const bar of hist) {
+    if (bar.c == null) continue;
+    while (ei < evs.length && evs[ei].date <= bar.t) {
+      const ev = evs[ei++];
+      if (ev.tx) {
+        const t = ev.tx, fee = txFee(t);
+        if (t.type === 'buy') { cost += t.qty * t.price + fee; qty += t.qty; started = true; }
+        else { const avg = qty > 0 ? cost / qty : 0; realized += t.qty * t.price - fee - t.qty * avg; cost -= t.qty * avg; qty -= t.qty; if (qty < 1e-6) { qty = 0; cost = 0; } }
+      } else {
+        const d = ev.div, sh = qty;
+        if (sh > 0) { const net = Math.round(sh * d.value * (1 - SETTINGS.taxDiv / 100)); divNet += net; if (adjust) cost -= net; }
+      }
+    }
+    if (started) {
+      const value = qty * bar.c;
+      const pnl = adjust ? (realized + value - cost) : (realized + value - cost + divNet);
+      out.push({ t: bar.t, v: pnl });
+    }
+  }
+  return out;
+}
+
+function pnlChartSVG(data) {
+  if (!data.length) return '<p class="muted small">Chưa có giao dịch để vẽ.</p>';
+  const W = 520, H = 170, padL = 8, padR = 8, padT = 14, padB = 22;
+  const vs = data.map(d => d.v);
+  let lo = Math.min(0, ...vs), hi = Math.max(0, ...vs);
+  const pad = (hi - lo) * 0.12 || 1; lo -= pad; hi += pad;
+  const n = data.length;
+  const X = i => padL + (i / (n - 1 || 1)) * (W - padL - padR);
+  const Y = v => padT + (1 - (v - lo) / (hi - lo || 1)) * (H - padT - padB);
+  const y0 = Y(0).toFixed(1);
+  const last = data[n - 1].v, col = last >= 0 ? '#0f7b46' : '#d23b3b';
+  const line = data.map((d, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(d.v).toFixed(1)).join('');
+  const area = `${line}L${X(n - 1).toFixed(1)},${y0}L${X(0).toFixed(1)},${y0}Z`;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="gp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity="0.22"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#gp)"/>
+    <line x1="${padL}" y1="${y0}" x2="${W - padR}" y2="${y0}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 3"/>
+    <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="${padL}" y="${H - 6}" font-size="10" fill="#7a8794">${data[0].t}</text>
+    <text x="${W - padR}" y="${H - 6}" text-anchor="end" font-size="10" fill="#7a8794">${data[n - 1].t}</text>
+  </svg>`;
+}
+
+function renderEquity() {
+  const card = $('equityCard');
+  const series = equitySeries();
+  if (!series.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  $('equityChart').innerHTML = pnlChartSVG(series);
+  const last = series[series.length - 1].v;
+  const peak = Math.max(...series.map(s => s.v)), trough = Math.min(...series.map(s => s.v));
+  $('equityLegend').innerHTML = `<span class="${cls(last)}">Hiện tại ${signed(money, last)}</span>` +
+    `<span class="muted">Cao nhất ${money(peak)}</span><span class="muted">Thấp nhất ${money(trough)}</span>`;
+}
+
+/* ---------- Hòa vốn + mua bình quân (DCA) ---------- */
+function renderBreakeven() {
+  const p = computePortfolio();
+  const sellCost = (SETTINGS.feeSell + SETTINGS.taxSell) / 100;
+  const be = p.qty ? p.avgCost / (1 - sellCost) : 0;
+  $('breakevenInfo').innerHTML = p.qty ? [
+    ['CP đang giữ', p.qty.toLocaleString('vi-VN')],
+    ['Giá vốn TB', vnd(p.avgCost)],
+    ['Giá hòa vốn (gồm phí bán)', vnd(be)],
+    ['Giá hiện tại', vnd(p.price)],
+    ['Cần tăng để hòa vốn', p.price ? signed(x => pct(x, 1), (be / p.price - 1) * 100) : '—'],
+  ].map(([k, v]) => `<div class="fact"><span class="muted">${k}</span><b>${v}</b></div>`).join('')
+    : '<p class="muted small">Chưa có CP. Nhập lệnh mua ở trên để tính hòa vốn.</p>';
+  calcDCA();
+}
+function calcDCA() {
+  const p = computePortfolio();
+  const q = parseInt($('dcaQty').value, 10), pr = parseFloat($('dcaPrice').value);
+  if (!q || !pr) { $('dcaResult').innerHTML = ''; return; }
+  const fee = Math.round(q * pr * SETTINGS.feeBuy / 100);
+  const newQty = p.qty + q;
+  const newCost = p.cost + q * pr + fee;
+  const newAvg = newQty > 0 ? newCost / newQty : 0;
+  const be = newAvg / (1 - (SETTINGS.feeSell + SETTINGS.taxSell) / 100);
+  $('dcaResult').innerHTML = '<div class="fact"><span class="muted">— Nếu mua thêm —</span><b></b></div>' + [
+    ['Tiền cần', vnd(q * pr + fee)],
+    ['CP sau mua', newQty.toLocaleString('vi-VN')],
+    ['Giá vốn TB mới', vnd(newAvg)],
+    ['Giá hòa vốn mới', vnd(be)],
+  ].map(([k, v]) => `<div class="fact"><span class="muted">${k}</span><b>${v}</b></div>`).join('');
+}
+
+/* ---------- Sự kiện sắp tới + tin tức ---------- */
+function renderNews() {
+  const tDay = today();
+  const upcoming = (DATA.events || []).filter(e => e.date && e.date >= tDay)
+    .sort((a, b) => a.date < b.date ? -1 : 1);
+  const el = $('eventList');
+  if (!upcoming.length) {
+    const recent = (DATA.events || []).filter(e => e.date).sort((a, b) => a.date < b.date ? 1 : -1)[0];
+    el.innerHTML = '<p class="muted small">Chưa có sự kiện sắp tới được công bố.' +
+      (recent ? ` Gần nhất: ${recent.title || recent.name} (${recent.date}).` : '') + '</p>';
+  } else {
+    el.innerHTML = upcoming.map(e => {
+      const days = Math.max(0, Math.ceil((new Date(e.date) - new Date(tDay)) / 86400000));
+      return `<div class="dv"><div class="dv-l"><b>${e.title || e.name}</b><div class="muted small">${e.date}</div></div>
+        <div class="dv-r"><span class="tag up">còn ${days} ngày</span></div></div>`;
+    }).join('');
+  }
+  const nl = $('newsList');
+  const news = DATA.news || [];
+  nl.innerHTML = news.length ? news.map(n => {
+    const title = n.url ? `<a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>` : n.title;
+    return `<div class="news"><div class="news-t">${title}</div><div class="muted small">${n.date || ''}${n.source ? ' · ' + n.source : ''}</div></div>`;
+  }).join('') : '<p class="muted small">Chưa có tin tức.</p>';
 }
 
 /* ===================== Events ===================== */
@@ -431,6 +603,7 @@ async function init() {
   $('exportBtn').onclick = exportData;
   $('importBtn').onclick = () => $('importFile').click();
   $('importFile').onchange = (e) => { if (e.target.files[0]) importData(e.target.files[0]); };
+  $('dcaQty').oninput = calcDCA; $('dcaPrice').oninput = calcDCA;
 
   if ('serviceWorker' in navigator) {
     try { await navigator.serviceWorker.register('sw.js'); } catch {}

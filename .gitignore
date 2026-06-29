@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 updater/update.log
+updater/vnstock_key.txt
 .DS_Store
 Thumbs.db
 .claude/

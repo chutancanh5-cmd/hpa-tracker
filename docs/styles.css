@@ -101,6 +101,12 @@ table.peer tr.me{background:var(--green-l)}
 table.peer tr.me td{font-weight:800}
 .profile{font-size:13px;color:var(--ink);white-space:pre-wrap}
 
+/* News */
+.newslist .news{padding:10px 0;border-bottom:1px solid var(--line)}
+.newslist .news:last-child{border-bottom:none}
+.news-t{font-size:13px;font-weight:600;line-height:1.4}
+.news-t a{color:var(--green);text-decoration:none}
+
 /* Chart */
 .chart{width:100%;overflow:visible}
 .chart svg{width:100%;height:auto;display:block}

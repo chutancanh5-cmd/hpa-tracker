@@ -48,6 +48,12 @@
       <p class="muted">Chưa có giao dịch nào. Bấm tab <b>Giao dịch</b> để nhập lệnh mua/bán đầu tiên của bạn.</p>
     </div>
 
+    <div class="card" id="equityCard" style="display:none">
+      <div class="card-title">Lãi/lỗ theo thời gian</div>
+      <div id="equityChart" class="chart"></div>
+      <div id="equityLegend" class="legend"></div>
+    </div>
+
     <div class="card">
       <div class="card-title">Phân tích nhanh</div>
       <div id="quickFacts" class="facts"></div>
@@ -85,6 +91,20 @@
     <div class="card">
       <div class="card-title">Lịch sử giao dịch <span class="muted" id="txCount"></span></div>
       <div id="txList" class="txlist"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Hòa vốn &amp; mua bình quân</div>
+      <div id="breakevenInfo" class="facts"></div>
+      <div class="row2" style="margin-top:12px">
+        <label class="muted" style="font-size:12px">Mua thêm (CP)
+          <input type="number" id="dcaQty" inputmode="numeric" min="0" step="1" placeholder="vd 1000">
+        </label>
+        <label class="muted" style="font-size:12px">Giá mua (đ/CP)
+          <input type="number" id="dcaPrice" inputmode="decimal" min="0" step="10" placeholder="vd 34000">
+        </label>
+      </div>
+      <div id="dcaResult" class="facts"></div>
     </div>
 
     <div class="card">
@@ -130,6 +150,14 @@
       <p class="muted small">Cổ tức tiền mặt theo năm tài chính. App tự cộng cổ tức cho số CP bạn nắm giữ <b>trước ngày GDKHQ</b> (ex-date).</p>
       <div id="divSchedule" class="schedule"></div>
     </div>
+    <div class="card">
+      <div class="card-title">Sự kiện sắp tới</div>
+      <div id="eventList" class="divlist"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tin tức gần đây</div>
+      <div id="newsList" class="newslist"></div>
+    </div>
   </section>
 
   <!-- ============ TAB: CƠ BẢN ============ -->
@@ -151,6 +179,12 @@
 
   <!-- ============ TAB: BIỂU ĐỒ ============ -->
   <section class="tab" id="tab-chart" hidden>
+    <div class="card">
+      <div class="card-title">HPA vs VN-Index vs Ngành</div>
+      <div id="benchChart" class="chart"></div>
+      <div id="benchLegend" class="legend"></div>
+      <p class="muted small" id="benchNote"></p>
+    </div>
     <div class="card">
       <div class="card-title">Giá đóng cửa
         <span class="seg small" id="adjSeg" style="float:right">

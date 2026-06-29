@@ -242,16 +242,19 @@ def adjusted_history(hist, dividends):
     return out
 
 
-def fetch_peers(current_fund):
-    """Lay peer cung nganh (industry 12) + chi so de so sanh."""
+def fetch_peers(start_date):
+    """Lay peer cung nganh (industry 12) + chi so so sanh + lich su gia (dung chi so nganh).
+
+    Tra ve (peers, peer_hist) voi peer_hist = {symbol: {date: close}}.
+    """
     peers = []
+    peer_hist = {}
     try:
         from vnstock import Vnstock
         listing = Vnstock().stock(symbol=SYMBOL, source=SOURCE).listing
         sym = listing.symbols_by_industries()
         same = sym[sym["industry_code"].astype(str) == PEER_INDUSTRY_CODE]
         syms = [x for x in same["symbol"].tolist() if x != SYMBOL]
-        # gioi han so luong, uu tien ma 3 ky tu (co phieu thuong)
         syms = [x for x in syms if len(str(x)) == 3][:MAX_PEERS]
         for code in syms:
             try:
@@ -270,12 +273,127 @@ def fetch_peers(current_fund):
                     "pb": round(num(kv.get("P/B")), 2) if num(kv.get("P/B")) else None,
                     "roe": round(roe * 100, 2) if roe is not None else None,
                 })
+                # lich su gia peer de dung chi so nganh
+                try:
+                    h = st.quote.history(start=start_date, end=date.today().isoformat(), interval="1D")
+                    peer_hist[code] = {
+                        (r["time"].strftime("%Y-%m-%d") if hasattr(r["time"], "strftime") else str(r["time"])[:10]):
+                        num(r["close"]) for _, r in h.iterrows() if num(r["close"])
+                    }
+                except Exception:
+                    pass
             except Exception as e:
                 log(f"peer {code} skip:", e)
         peers.sort(key=lambda x: x["market_cap"] or 0, reverse=True)
     except Exception as e:
         log("peers err:", e)
-    return peers
+    return peers, peer_hist
+
+
+def fetch_vnindex(start_date):
+    """Lay lich su VNINDEX -> {date: close}."""
+    out = {}
+    try:
+        from vnstock import Vnstock
+        vi = Vnstock().stock(symbol="VNINDEX", source=SOURCE).quote.history(
+            start=start_date, end=date.today().isoformat(), interval="1D")
+        for _, r in vi.iterrows():
+            t = r["time"]
+            t = t.strftime("%Y-%m-%d") if hasattr(t, "strftime") else str(t)[:10]
+            c = num(r["close"])
+            if c:
+                out[t] = c
+    except Exception as e:
+        log("vnindex err:", e)
+    return out
+
+
+def build_benchmark(hist, vnindex, peer_hist):
+    """Dung 3 duong rebase ve 100 tren cung khung ngay cua HPA:
+    HPA, VN-Index, va chi so Nganh (binh quan deu cac peer)."""
+    dates = [h["t"] for h in hist if h["c"]]
+    hpa_c = {h["t"]: h["c"] for h in hist if h["c"]}
+    if not dates:
+        return {}
+    base_hpa = hpa_c[dates[0]]
+    # VN-Index: forward-fill va rebase
+    vi_series, last_vi, base_vi = [], None, None
+    for t in dates:
+        if t in vnindex:
+            last_vi = vnindex[t]
+        if base_vi is None and last_vi:
+            base_vi = last_vi
+        vi_series.append(round(last_vi / base_vi * 100, 2) if (last_vi and base_vi) else None)
+    # Nganh: moi peer rebase ve gia tri tai ngay dau co du lieu, roi binh quan deu
+    peer_base = {}
+    ind_series = []
+    for t in dates:
+        vals = []
+        for code, hh in peer_hist.items():
+            if t in hh:
+                if code not in peer_base:
+                    peer_base[code] = hh[t]
+                vals.append(hh[t] / peer_base[code] * 100)
+        ind_series.append(round(sum(vals) / len(vals), 2) if vals else None)
+    hpa_series = [round(hpa_c[t] / base_hpa * 100, 2) for t in dates]
+    return {
+        "dates": dates,
+        "hpa": hpa_series,
+        "vnindex": vi_series,
+        "industry": ind_series,
+        "n_peers": len(peer_hist),
+    }
+
+
+def fetch_news(s, limit=12):
+    """Tin tuc gan day ve HPA tu company.news()."""
+    out = []
+    try:
+        n = s.company.news()
+        if n is None or not len(n):
+            return out
+        for _, r in n.head(limit).iterrows():
+            title = r.get("news_title") or r.get("friendly_title")
+            pd_ = r.get("public_date")
+            # public_date co the la epoch ms hoac chuoi
+            ds = None
+            try:
+                if pd_ is not None and str(pd_).isdigit():
+                    ds = datetime.fromtimestamp(int(pd_) / 1000, VN_TZ).strftime("%Y-%m-%d")
+                elif pd_ is not None:
+                    ds = str(pd_)[:10]
+            except Exception:
+                ds = str(pd_)[:10] if pd_ is not None else None
+            out.append({
+                "title": str(title).strip() if title else "",
+                "date": ds,
+                "source": str(r.get("news_source") or "").strip(),
+                "url": str(r.get("news_source_link") or "").strip(),
+            })
+    except Exception as e:
+        log("news err:", e)
+    return out
+
+
+def fetch_events_all(s, limit=12):
+    """Cac su kien doanh nghiep (DH co dong, co tuc, niem yet...) cho phan nhac lich."""
+    out = []
+    try:
+        ev = s.company.events()
+        if ev is None or not len(ev):
+            return out
+        for _, r in ev.head(limit).iterrows():
+            d = r.get("exright_date") or r.get("public_date") or r.get("display_date1")
+            d = str(d)[:10] if d is not None and str(d) != "nan" else None
+            out.append({
+                "name": str(r.get("event_name_vi") or "").strip(),
+                "title": str(r.get("event_title_vi") or "").strip(),
+                "code": str(r.get("event_code") or "").strip(),
+                "date": d,
+            })
+    except Exception as e:
+        log("events err:", e)
+    return out
 
 
 def compute_cycle(hist):
@@ -305,19 +423,51 @@ def compute_cycle(hist):
     }
 
 
+def setup_vnstock_key():
+    """Nap API key vnstock: uu tien bien moi truong VNSTOCK_API_KEY, sau do
+    file updater/vnstock_key.txt (khong commit). Neu khong co, dung key da dang ky
+    san trong ~/.vnstock/api_key.json."""
+    key = os.getenv("VNSTOCK_API_KEY")
+    if not key:
+        kf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vnstock_key.txt")
+        if os.path.exists(kf):
+            try:
+                with open(kf, encoding="utf-8") as f:
+                    key = f.read().strip()
+            except Exception:
+                key = None
+    if key and not key.startswith("#") and len(key) >= 10:
+        os.environ["VNSTOCK_API_KEY"] = key  # vnai uu tien doc bien nay
+    # bao cao tier dang dung
+    try:
+        import vnai
+        st = vnai.check_api_key_status()
+        log("vnstock tier:", st.get("tier"), "| limits:", st.get("limits"))
+    except Exception:
+        pass
+
+
 def main():
     log("bat dau cap nhat", SYMBOL)
+    setup_vnstock_key()
     s = get_stock()
     hist = fetch_price_history(s)
     log("price history:", len(hist), "phien")
+    start_date = hist[0]["t"] if hist else "2026-02-01"
     cur, prev = fetch_current_price(s, hist)
     ov = fetch_overview(s)
     fund = fetch_fundamentals(s, num(ov.get("market_cap")), cur)
     divs = fetch_dividends(s)
     log("dividends:", len(divs))
     adj = adjusted_history(hist, divs)
-    peers = fetch_peers(fund)
+    peers, peer_hist = fetch_peers(start_date)
     log("peers:", len(peers))
+    vnindex = fetch_vnindex(start_date)
+    benchmark = build_benchmark(hist, vnindex, peer_hist)
+    log("benchmark dates:", len(benchmark.get("dates", [])), "| peers in index:", benchmark.get("n_peers"))
+    news = fetch_news(s)
+    log("news:", len(news))
+    events = fetch_events_all(s)
     cycle = compute_cycle(hist)
 
     change = None
@@ -346,6 +496,9 @@ def main():
         "dividends": divs,
         "peers": peers,
         "cycle": cycle,
+        "benchmark": benchmark,
+        "news": news,
+        "events": events,
         "price_history": hist,
         "adj_history": adj,
     }
