@@ -260,6 +260,7 @@ function renderFundamentals() {
 }
 
 function renderChart() {
+  renderTechnical();
   renderBenchmark();
   const series = adjMode === 'adj'
     ? (DATA.adj_history || []).map(d => ({ t: d.t, c: d.c }))
@@ -375,6 +376,29 @@ function renderBenchmark() {
   $('benchNote').textContent = `Rebase 100 từ phiên đầu (${b.dates[0]}). ` +
     (diff != null ? (diff < 0 ? `HPA đang thua ngành ${Math.abs(diff).toFixed(1)} điểm %.` : `HPA đang thắng ngành ${diff.toFixed(1)} điểm %.`) : '') +
     ` Chỉ số ngành = bình quân đều ${b.n_peers} mã cùng ngành.`;
+}
+
+/* ---------- Tín hiệu kỹ thuật ---------- */
+function renderTechnical() {
+  const t = DATA.technical;
+  const badge = $('techBadge'), grid = $('techGrid'), sig = $('techSignals');
+  if (!t || !t.signals) { badge.textContent = ''; grid.innerHTML = '<p class="muted small">Chưa có dữ liệu kỹ thuật.</p>'; sig.innerHTML = ''; return; }
+  const vcls = v => v === 'tích cực' ? 'pos' : v === 'tiêu cực' ? 'neg' : 'neutral';
+  badge.textContent = t.label;
+  badge.className = 'techbadge ' + vcls(t.label.toLowerCase());
+  grid.innerHTML = [
+    ['RSI (14)', t.rsi ?? '—'],
+    ['MACD', t.macd_hist != null ? (t.macd_hist > 0 ? 'cắt lên ▲' : 'cắt xuống ▼') : '—'],
+    ['MA20', t.ma20 ? vnd(t.ma20) : '—'],
+    ['MA50', t.ma50 ? vnd(t.ma50) : '—'],
+    ['ADX', t.adx != null ? `${t.adx} (${t.trend_strength || ''})` : '—'],
+    ['Giá hiện tại', vnd(DATA.current_price)],
+  ].map(([k, v]) => `<div class="fg"><div class="fg-l">${k}</div><div class="fg-v">${v}</div></div>`).join('');
+  sig.innerHTML = t.signals.map(s => `<div class="techsig">
+      <span class="techsig-n">${s.name}</span>
+      <span class="techsig-note muted small">${s.note || ''}</span>
+      <span class="pill ${vcls(s.verdict)}">${s.verdict}</span>
+    </div>`).join('');
 }
 
 /* ---------- Lãi/lỗ tích lũy theo thời gian ---------- */

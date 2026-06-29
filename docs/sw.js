@@ -1,5 +1,5 @@
 /* Service worker: app shell cache-first, dữ liệu network-first */
-const CACHE = 'hpa-v2';
+const CACHE = 'hpa-v3';
 const SHELL = [
   './', './index.html', './styles.css', './app.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'

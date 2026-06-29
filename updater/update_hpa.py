@@ -61,9 +61,13 @@ def get_stock():
 
 
 # ----------------------------------------------------------------------------
-def fetch_price_history(s):
-    """Lay toan bo lich su gia ngay (gia *1000 VND)."""
-    df = s.quote.history(start="2015-01-01", end=date.today().isoformat(), interval="1D")
+def get_history_df(s):
+    """Lay DataFrame OHLCV ngay (dung cho ca price_history lan chi bao ky thuat)."""
+    return s.quote.history(start="2015-01-01", end=date.today().isoformat(), interval="1D")
+
+
+def df_to_rows(df):
+    """Chuyen df OHLCV -> list dict (gia *1000 VND)."""
     rows = []
     for _, r in df.iterrows():
         t = r["time"]
@@ -77,6 +81,68 @@ def fetch_price_history(s):
             "v": int(num(r["volume"]) or 0),
         })
     return rows
+
+
+def fetch_technical(df):
+    """Tinh tin hieu ky thuat tu vnstock_ta (RSI, MACD, MA20/50, ADX) + tong hop."""
+    out = {}
+    try:
+        from vnstock_ta import Indicator
+        I = Indicator(df)
+        price = num(df["close"].iloc[-1]) * 1000
+        rsi = num(I.rsi(length=14).iloc[-1])
+        macd = I.macd()
+        macd_line = num(macd["MACD_12_26_9"].iloc[-1])
+        macd_sig = num(macd["MACDs_12_26_9"].iloc[-1])
+        macd_hist = num(macd["MACDh_12_26_9"].iloc[-1])
+        ma20 = num(I.sma(length=20).iloc[-1])
+        ma50 = num(I.sma(length=50).iloc[-1])
+        ma20 = round(ma20 * 1000) if ma20 else None
+        ma50 = round(ma50 * 1000) if ma50 else None
+        try:
+            adx = num(I.adx()["ADX_14"].iloc[-1])
+        except Exception:
+            adx = None
+
+        signals = []
+        # RSI
+        if rsi is not None:
+            if rsi >= 70:
+                signals.append(("RSI", round(rsi, 1), "tiêu cực", "quá mua (>70)"))
+            elif rsi <= 30:
+                signals.append(("RSI", round(rsi, 1), "tích cực", "quá bán (<30)"))
+            else:
+                signals.append(("RSI", round(rsi, 1), "trung tính", "vùng cân bằng"))
+        # MACD
+        if macd_hist is not None:
+            signals.append(("MACD", None, "tích cực" if macd_hist > 0 else "tiêu cực",
+                            "cắt lên đường tín hiệu" if macd_hist > 0 else "cắt xuống đường tín hiệu"))
+        # MA20 / MA50
+        if ma20 and price:
+            signals.append(("Giá vs MA20", None, "tích cực" if price >= ma20 else "tiêu cực",
+                            ("trên" if price >= ma20 else "dưới") + " MA20 " + f"{ma20:,}".replace(",", ".")))
+        if ma50 and price:
+            signals.append(("Giá vs MA50", None, "tích cực" if price >= ma50 else "tiêu cực",
+                            ("trên" if price >= ma50 else "dưới") + " MA50 " + f"{ma50:,}".replace(",", ".")))
+
+        score = sum(1 if s[2] == "tích cực" else -1 if s[2] == "tiêu cực" else 0 for s in signals)
+        label = "Tích cực" if score >= 2 else "Tiêu cực" if score <= -2 else "Trung tính"
+        trend = None
+        if adx is not None:
+            trend = "mạnh" if adx >= 25 else "yếu" if adx < 20 else "vừa"
+        out = {
+            "rsi": round(rsi, 1) if rsi is not None else None,
+            "macd": round(macd_line, 3) if macd_line is not None else None,
+            "macd_hist": round(macd_hist, 3) if macd_hist is not None else None,
+            "ma20": ma20, "ma50": ma50,
+            "adx": round(adx, 1) if adx is not None else None,
+            "trend_strength": trend,
+            "signals": [{"name": n, "value": v, "verdict": vd, "note": nt} for (n, v, vd, nt) in signals],
+            "score": score, "label": label,
+        }
+    except Exception as e:
+        log("technical err:", e)
+    return out
 
 
 def fetch_current_price(s, hist):
@@ -447,61 +513,84 @@ def setup_vnstock_key():
         pass
 
 
+def load_existing():
+    """Doc hpa.json hien co (cho che do --light)."""
+    try:
+        with open(OUT, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def main():
-    log("bat dau cap nhat", SYMBOL)
+    light = "--light" in sys.argv
+    log("bat dau cap nhat", SYMBOL, "(light)" if light else "(full)")
     setup_vnstock_key()
     s = get_stock()
-    hist = fetch_price_history(s)
+    df = get_history_df(s)
+    hist = df_to_rows(df)
     log("price history:", len(hist), "phien")
     start_date = hist[0]["t"] if hist else "2026-02-01"
     cur, prev = fetch_current_price(s, hist)
-    ov = fetch_overview(s)
-    fund = fetch_fundamentals(s, num(ov.get("market_cap")), cur)
-    divs = fetch_dividends(s)
-    log("dividends:", len(divs))
-    adj = adjusted_history(hist, divs)
-    peers, peer_hist = fetch_peers(start_date)
-    log("peers:", len(peers))
-    vnindex = fetch_vnindex(start_date)
-    benchmark = build_benchmark(hist, vnindex, peer_hist)
-    log("benchmark dates:", len(benchmark.get("dates", [])), "| peers in index:", benchmark.get("n_peers"))
-    news = fetch_news(s)
-    log("news:", len(news))
-    events = fetch_events_all(s)
-    cycle = compute_cycle(hist)
+    technical = fetch_technical(df)
+    log("technical:", technical.get("label"), "| RSI", technical.get("rsi"))
 
-    change = None
-    change_pct = None
-    if cur is not None and prev:
-        change = cur - prev
-        change_pct = round(change / prev * 100, 2)
+    change = cur - prev if (cur is not None and prev) else None
+    change_pct = round(change / prev * 100, 2) if (change is not None and prev) else None
 
-    data = {
-        "symbol": SYMBOL,
-        "name": str(ov.get("organ_name") or "CTCP Phat trien Nong nghiep Hoa Phat"),
-        "short_name": str(ov.get("organ_short_name") or "Nong nghiep Hoa Phat"),
-        "exchange": "HOSE",
-        "sector": str(ov.get("sector") or "Nong - Lam - Ngu"),
-        "listing_date": str(ov.get("listing_date") or "2026-02-06")[:10],
-        "updated_at": datetime.now(VN_TZ).isoformat(timespec="seconds"),
-        "current_price": cur,
-        "prev_close": prev,
-        "change": change,
-        "change_pct": change_pct,
-        "market_cap": num(ov.get("market_cap")),
-        "shares": num(ov.get("issue_share")),
-        "foreign_pct": round(num(ov.get("foreigner_percentage")) * 100, 2) if num(ov.get("foreigner_percentage")) else None,
-        "profile": str(ov.get("company_profile") or ""),
-        "fundamentals": fund,
-        "dividends": divs,
-        "peers": peers,
-        "cycle": cycle,
-        "benchmark": benchmark,
-        "news": news,
-        "events": events,
-        "price_history": hist,
-        "adj_history": adj,
-    }
+    if light:
+        # Che do nhe: chi lam moi GIA + KY THUAT, giu nguyen phan nang (peers/benchmark/news...)
+        data = load_existing()
+        divs = data.get("dividends", [])
+        data.update({
+            "updated_at": datetime.now(VN_TZ).isoformat(timespec="seconds"),
+            "current_price": cur, "prev_close": prev, "change": change, "change_pct": change_pct,
+            "price_history": hist,
+            "adj_history": adjusted_history(hist, divs),
+            "cycle": compute_cycle(hist),
+            "technical": technical,
+        })
+        log("light: chi cap nhat gia + ky thuat (giu peers/benchmark/news cu)")
+    else:
+        ov = fetch_overview(s)
+        fund = fetch_fundamentals(s, num(ov.get("market_cap")), cur)
+        divs = fetch_dividends(s)
+        log("dividends:", len(divs))
+        peers, peer_hist = fetch_peers(start_date)
+        log("peers:", len(peers))
+        vnindex = fetch_vnindex(start_date)
+        benchmark = build_benchmark(hist, vnindex, peer_hist)
+        log("benchmark dates:", len(benchmark.get("dates", [])), "| peers in index:", benchmark.get("n_peers"))
+        news = fetch_news(s)
+        log("news:", len(news))
+        events = fetch_events_all(s)
+        data = {
+            "symbol": SYMBOL,
+            "name": str(ov.get("organ_name") or "CTCP Phat trien Nong nghiep Hoa Phat"),
+            "short_name": str(ov.get("organ_short_name") or "Nong nghiep Hoa Phat"),
+            "exchange": "HOSE",
+            "sector": str(ov.get("sector") or "Nong - Lam - Ngu"),
+            "listing_date": str(ov.get("listing_date") or "2026-02-06")[:10],
+            "updated_at": datetime.now(VN_TZ).isoformat(timespec="seconds"),
+            "current_price": cur,
+            "prev_close": prev,
+            "change": change,
+            "change_pct": change_pct,
+            "market_cap": num(ov.get("market_cap")),
+            "shares": num(ov.get("issue_share")),
+            "foreign_pct": round(num(ov.get("foreigner_percentage")) * 100, 2) if num(ov.get("foreigner_percentage")) else None,
+            "profile": str(ov.get("company_profile") or ""),
+            "fundamentals": fund,
+            "dividends": divs,
+            "peers": peers,
+            "cycle": compute_cycle(hist),
+            "benchmark": benchmark,
+            "news": news,
+            "events": events,
+            "technical": technical,
+            "price_history": hist,
+            "adj_history": adjusted_history(hist, divs),
+        }
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:

@@ -101,6 +101,22 @@ table.peer tr.me{background:var(--green-l)}
 table.peer tr.me td{font-weight:800}
 .profile{font-size:13px;color:var(--ink);white-space:pre-wrap}
 
+/* Technical */
+.techbadge{font-size:12px;font-weight:800;padding:3px 10px;border-radius:8px;margin-left:6px;vertical-align:middle}
+.techbadge.pos{background:var(--green-l);color:var(--green)}
+.techbadge.neg{background:#fde2e2;color:var(--red)}
+.techbadge.neutral{background:#eef1f4;color:#5a6672}
+.techsignals{margin-top:12px}
+.techsig{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line)}
+.techsig:last-child{border-bottom:none}
+.techsig-n{font-weight:700;font-size:13px;min-width:84px}
+.techsig-note{flex:1}
+.pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;white-space:nowrap}
+.pill.pos{background:var(--green-l);color:var(--green)}
+.pill.neg{background:#fde2e2;color:var(--red)}
+.pill.neutral{background:#eef1f4;color:#5a6672}
+@media (prefers-color-scheme:dark){.techbadge.neutral,.pill.neutral{background:#222b33;color:#9aa6b1}.techbadge.neg,.pill.neg{background:#3a1d1d}}
+
 /* News */
 .newslist .news{padding:10px 0;border-bottom:1px solid var(--line)}
 .newslist .news:last-child{border-bottom:none}
