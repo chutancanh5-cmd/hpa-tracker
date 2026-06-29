@@ -513,6 +513,44 @@ def setup_vnstock_key():
         pass
 
 
+def vn_now():
+    """Gio Viet Nam (UTC+7) — KHONG phu thuoc mui gio cua may."""
+    return datetime.now(VN_TZ)
+
+
+def vn_today():
+    return vn_now().strftime("%Y-%m-%d")
+
+
+def vn_market_open():
+    """True neu dang trong phien giao dich HOSE (gio VN): T2-T6,
+    sang 9:00-11:30, chieu 13:00-15:00."""
+    now = vn_now()
+    if now.weekday() >= 5:  # T7/CN
+        return False
+    t = now.hour * 60 + now.minute
+    return (9 * 60 <= t <= 11 * 60 + 30) or (13 * 60 <= t <= 15 * 60 + 1)
+
+
+MARKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last_full_date")
+
+
+def _read_marker():
+    try:
+        with open(MARKER, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _write_marker(d):
+    try:
+        with open(MARKER, "w", encoding="utf-8") as f:
+            f.write(d)
+    except Exception:
+        pass
+
+
 def load_existing():
     """Doc hpa.json hien co (cho che do --light)."""
     try:
@@ -523,7 +561,25 @@ def load_existing():
 
 
 def main():
+    auto = "--auto" in sys.argv
+    force = "--force" in sys.argv
     light = "--light" in sys.argv
+    do_full_marker = False
+
+    # --auto: tu quyet dinh full/light/skip theo GIO VIET NAM (truoc khi import vnstock)
+    if auto:
+        full_due = (_read_marker() != vn_today()) and vn_now().hour >= 8
+        if full_due:
+            light = False
+            do_full_marker = True
+            log("auto -> FULL update (lan dau trong ngay, gio VN", vn_now().strftime("%H:%M") + ")")
+        elif vn_market_open() or force:
+            light = True
+            log("auto -> LIGHT update (gio giao dich VN", vn_now().strftime("%H:%M") + ")")
+        else:
+            log("auto -> BO QUA (ngoai gio giao dich VN, hien", vn_now().strftime("%a %H:%M") + ")")
+            return
+
     log("bat dau cap nhat", SYMBOL, "(light)" if light else "(full)")
     setup_vnstock_key()
     s = get_stock()
@@ -596,6 +652,9 @@ def main():
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     log("da ghi", OUT, f"({os.path.getsize(OUT)//1024} KB)")
+
+    if do_full_marker:
+        _write_marker(vn_today())
 
     if "--push" in sys.argv:
         git_push()

@@ -21,7 +21,8 @@ const SEED_TX = [
 
 /* ===================== Helpers ===================== */
 const $ = (id) => document.getElementById(id);
-const today = () => new Date().toISOString().slice(0, 10);
+// "Hôm nay" theo giờ Việt Nam (UTC+7), không phụ thuộc múi giờ thiết bị
+const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
 
 function vnd(n, dp = 0) {
   if (n == null || isNaN(n)) return '—';
