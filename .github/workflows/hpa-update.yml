@@ -1,0 +1,45 @@
+name: hpa-update
+# Cap nhat du lieu HPA. Moi 15' trong 01:00-08:45 UTC = 08:00-15:45 gio VN (T2-T6),
+# + 02:07 UTC = 09:07 VN cuoi tuan (full update ngay nghi). Script tu quyet full/light/skip.
+on:
+  schedule:
+    - cron: '*/15 1-8 * * 1-5'
+    - cron: '7 2 * * 0,6'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hpa-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Ho_Chi_Minh
+      VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+      ACCEPT_TC: "tôi đồng ý"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r updater/requirements.txt
+      - name: Git identity
+        run: |
+          git config user.name "hpa-bot"
+          git config user.email "actions@users.noreply.github.com"
+      - name: Run updater
+        run: python updater/update_hpa.py --auto --push
+      - name: Commit full-update marker
+        run: |
+          git add -f updater/.last_full_date || true
+          if git diff --cached --quiet; then echo "khong co thay doi"; else
+            git commit -m "state: full-update marker $(date +%F)"
+            git fetch origin main
+            git rebase -X theirs origin/main || git rebase --abort
+            git push
+          fi
