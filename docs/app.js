@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS = { feeBuy: 0.15, feeSell: 0.15, taxSell: 0.10, taxDiv: 5
 let DATA = null;        // dữ liệu thị trường (từ data/hpa.json)
 let SECTORS = null;     // chu kỳ ngành (từ data/sectors.json)
 const KEY_SECTORS = 'hpa_sectors_v1';
+let AGRI = null;        // chu kỳ chăn nuôi cơ bản (từ data/agri_cycle.json)
+const KEY_AGRI = 'hpa_agri_v1';
 let TX = [];            // giao dịch của người dùng
 let SETTINGS = { ...DEFAULT_SETTINGS };
 let editingId = null;   // id lệnh đang sửa
@@ -69,6 +71,14 @@ async function loadData() {
     localStorage.setItem(KEY_SECTORS, JSON.stringify(SECTORS));
   } catch (e) {
     try { SECTORS = JSON.parse(localStorage.getItem(KEY_SECTORS)); } catch { SECTORS = null; }
+  }
+  try {
+    const r = await fetch('data/agri_cycle.json?ts=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    AGRI = await r.json();
+    localStorage.setItem(KEY_AGRI, JSON.stringify(AGRI));
+  } catch (e) {
+    try { AGRI = JSON.parse(localStorage.getItem(KEY_AGRI)); } catch { AGRI = null; }
   }
 }
 
@@ -342,6 +352,64 @@ function renderSectors() {
     <td class="${cls(s.mom)}">${s.mom > 0 ? '+' : ''}${s.mom}%</td><td>${s.breadth50}%</td></tr>`).join('');
   $('sectorTable').innerHTML = html + '</tbody>';
   $('sectorNote').textContent = `RS = sức mạnh giá ngành so với VNINDEX (≥100 là mạnh hơn trung bình 3 tháng); Đà = thay đổi RS trong 21 phiên; đuôi mờ = dấu vết 8 tuần. Chu kỳ thường xoay: Hồi phục → Dẫn dắt → Suy yếu → Tụt hậu. Số liệu ngày ${SECTORS.date}, tính sau giờ đóng cửa.`;
+}
+
+/* ===================== Chu kỳ ngành chăn nuôi (cơ bản: lợn vs thức ăn) ===================== */
+function agriChartSVG(S) {
+  const t = S.t, n = t.length;
+  const specs = [
+    ['hog',   'Giá lợn (CME)',        '#c0392b', 1.3],
+    ['feed',  'Chi phí thức ăn',       '#7f8c8d', 1.3],
+    ['ratio', 'Lợn/Thức ăn (biên CN)', '#e08a00', 2.4],
+    ['hpa',   'Giá HPA',               '#0f7b46', 2.0],
+  ];
+  const vals = specs.flatMap(([k]) => S[k]).filter(v => v != null);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const W = 520, H = 230, pl = 8, pr = 8, pt = 10, pb = 20;
+  const X = i => pl + i / (n - 1 || 1) * (W - pl - pr);
+  const Y = v => pt + (1 - (v - lo) / (hi - lo || 1)) * (H - pt - pb);
+  let out = `<line x1="${pl}" y1="${Y(100).toFixed(1)}" x2="${W - pr}" y2="${Y(100).toFixed(1)}" stroke="#ccc" stroke-dasharray="3,3"/>`;
+  for (const [k, , col, wd] of specs) {
+    let d = '', pen = false;
+    (S[k] || []).forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1); pen = true;
+    });
+    if (d) out += `<path d="${d}" fill="none" stroke="${col}" stroke-width="${wd}"/>`;
+  }
+  out += `<text x="${pl}" y="${H - 5}" font-size="10" fill="#888">${t[0]}</text>`
+       + `<text x="${W - pr}" y="${H - 5}" text-anchor="end" font-size="10" fill="#888">${t[n - 1]}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">${out}</svg>`;
+}
+function renderAgri() {
+  if (!$('agriChart')) return;
+  if (!AGRI || !AGRI.series) {
+    $('agriFacts').innerHTML = '<div class="muted small">Chưa có dữ liệu chu kỳ chăn nuôi — updater tính 1 lần/ngày.</div>';
+    $('agriChart').innerHTML = ''; $('agriLegend').innerHTML = ''; $('agriNote').textContent = '';
+    return;
+  }
+  const st = AGRI.stats || {};
+  const zone = st.ratio_pctile_3y >= 70 ? 'vùng CAO 3 năm' : st.ratio_pctile_3y <= 30 ? 'vùng THẤP 3 năm' : 'vùng giữa';
+  const dirTxt = st.ratio_chg_13w > 2 ? 'đang MỞ RỘNG' : st.ratio_chg_13w < -2 ? 'đang THU HẸP' : 'đi ngang';
+  const talk = st.ratio_pctile_3y >= 70
+    ? (st.ratio_chg_13w > 2 ? 'Biên chăn nuôi cao và còn mở rộng — giai đoạn thuận lợi nhất của chu kỳ; nhưng lãi cao sẽ kích thích tái đàn, cẩn trọng 2-3 quý sau.'
+                            : 'Biên cao nhưng hết đà — thường là vùng đỉnh chu kỳ, nguồn cung tái đàn sắp gây áp lực.')
+    : st.ratio_pctile_3y <= 30
+    ? (st.ratio_chg_13w < -2 ? 'Biên chăn nuôi thấp và còn thu hẹp — pha khó khăn; đàn nái giảm dần, chờ tín hiệu tạo đáy.'
+                             : 'Biên thấp nhưng ngừng xấu đi — vùng đáy chu kỳ hay xuất hiện ở đây, đáng theo dõi để đón sóng hồi.')
+    : 'Biên chăn nuôi ở vùng trung tính — chu kỳ chưa nghiêng hẳn về hướng nào.';
+  const corr = (st.best_r != null && Math.abs(st.best_r) >= 0.4)
+    ? `Tỷ số lợn/thức ăn <b>dẫn trước giá HPA ~${st.best_lag_w} tuần</b> (tương quan r=${st.best_r}; cùng thời điểm r=${st.corr_lag0}).`
+    : `Tương quan với giá HPA còn yếu (r=${st.best_r ?? '—'}) — giá HPA đang chịu thêm yếu tố ngoài chu kỳ (thanh khoản UPCOM, tin doanh nghiệp).`;
+  $('agriFacts').innerHTML = [
+    ['Lợn/Thức ăn', `${st.ratio_now} <span class="muted small">(gốc=100)</span>`],
+    ['Vị trí 3 năm', `${st.ratio_pctile_3y}% · ${zone}`],
+    ['13 tuần', `${st.ratio_chg_13w > 0 ? '+' : ''}${st.ratio_chg_13w}% · ${dirTxt}`],
+  ].map(([k, v]) => `<div class="fg"><div class="fg-l">${k}</div><div class="fg-v">${v}</div></div>`).join('');
+  $('agriChart').innerHTML = agriChartSVG(AGRI.series);
+  $('agriLegend').innerHTML = [['#e08a00', 'Lợn/Thức ăn (biên)'], ['#c0392b', 'Giá lợn'], ['#7f8c8d', 'Thức ăn'], ['#0f7b46', 'HPA']]
+    .map(([c, l]) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:3px;background:${c};display:inline-block;border-radius:2px"></i>${l}</span>`).join('');
+  $('agriNote').innerHTML = `${talk}<br>${corr}<br><span class="muted">${AGRI.biz}<br>${AGRI.proxy_note} Chuẩn hóa gốc=100 tại ${AGRI.series.t[0]}.</span>`;
 }
 
 function renderChart() {
@@ -678,7 +746,7 @@ function importData(file) {
   fr.readAsText(file);
 }
 
-function renderAll() { renderOverview(); renderTrades(); renderDividends(); renderFundamentals(); renderSectors();
+function renderAll() { renderOverview(); renderTrades(); renderDividends(); renderFundamentals(); renderSectors(); renderAgri();
   if (!$('tab-chart').hidden) renderChart(); }
 
 /* ===================== Init ===================== */
