@@ -143,3 +143,11 @@ details summary{font-weight:600;cursor:pointer;padding:4px 0}
 label.chk{display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:13px;cursor:pointer}
 label.chk input{width:18px;height:18px;margin-top:1px;flex:none}
 input[type=date]{-webkit-appearance:none}
+
+/* Chu ky nganh (sector rotation) */
+.phz{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:7px;white-space:nowrap}
+.phz.lead{background:rgba(43,213,118,.16);color:#2bd576}
+.phz.improve{background:rgba(74,163,255,.16);color:#4aa3ff}
+.phz.weak{background:rgba(227,179,65,.16);color:#e3b341}
+.phz.lag{background:rgba(255,91,110,.16);color:#ff5b6e}
+#rrgChart svg{border-radius:10px;background:var(--bg2, rgba(0,0,0,.15))}

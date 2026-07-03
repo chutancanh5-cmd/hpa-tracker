@@ -42,8 +42,11 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
       - name: Run updater
         run: python updater/update_hpa.py --auto --push
+      - name: Chu ky nganh (tu gate - 1 lan/ngay sau phien)
+        run: python updater/update_sectors.py || true
       - name: Commit full-update marker
         run: |
+          git add docs/data/sectors.json 2>/dev/null || true
           git add -f updater/.last_full_date || true
           if git diff --cached --quiet; then echo "khong co thay doi"; else
             git commit -m "state: full-update marker $(date +%F)"
