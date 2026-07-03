@@ -8,8 +8,6 @@ const KEY_DATA = 'hpa_data_cache_v1';
 const DEFAULT_SETTINGS = { feeBuy: 0.15, feeSell: 0.15, taxSell: 0.10, taxDiv: 5.0, adjustCostByDiv: true };
 
 let DATA = null;        // dữ liệu thị trường (từ data/hpa.json)
-let SECTORS = null;     // chu kỳ ngành (từ data/sectors.json)
-const KEY_SECTORS = 'hpa_sectors_v1';
 let AGRI = null;        // chu kỳ chăn nuôi cơ bản (từ data/agri_cycle.json)
 const KEY_AGRI = 'hpa_agri_v1';
 let TX = [];            // giao dịch của người dùng
@@ -63,14 +61,6 @@ async function loadData() {
     const cached = localStorage.getItem(KEY_DATA);
     if (cached) DATA = JSON.parse(cached);
     else DATA = { symbol: 'HPA', current_price: null, dividends: [], peers: [], fundamentals: {}, price_history: [], adj_history: [], cycle: {} };
-  }
-  try {
-    const r = await fetch('data/sectors.json?ts=' + Date.now(), { cache: 'no-store' });
-    if (!r.ok) throw new Error('http ' + r.status);
-    SECTORS = await r.json();
-    localStorage.setItem(KEY_SECTORS, JSON.stringify(SECTORS));
-  } catch (e) {
-    try { SECTORS = JSON.parse(localStorage.getItem(KEY_SECTORS)); } catch { SECTORS = null; }
   }
   try {
     const r = await fetch('data/agri_cycle.json?ts=' + Date.now(), { cache: 'no-store' });
@@ -280,80 +270,6 @@ function renderFundamentals() {
   $('profile').textContent = DATA.profile || '—';
 }
 
-/* ===================== Chu kỳ ngành (sector rotation, kiểu RRG) ===================== */
-const PHASE_META = {
-  lead:    ['Dẫn dắt',  '#2bd576'],
-  improve: ['Hồi phục', '#4aa3ff'],
-  weak:    ['Suy yếu',  '#e3b341'],
-  lag:     ['Tụt hậu',  '#ff5b6e'],
-};
-function rrgSVG(sectors) {
-  const W = 520, H = 300, pl = 12, pr = 12, pt = 14, pb = 16;
-  const xs = sectors.flatMap(s => [s.mom, ...(s.trail || []).map(t => t[1])]);
-  const ys = sectors.flatMap(s => [s.rs, ...(s.trail || []).map(t => t[0])]);
-  const xr = Math.max(3, ...xs.map(Math.abs)) * 1.2;
-  const yr = Math.max(2.5, ...ys.map(v => Math.abs(v - 100))) * 1.2;
-  const X = v => pl + (Math.max(-xr, Math.min(xr, v)) + xr) / (2 * xr) * (W - pl - pr);
-  const Y = v => pt + (1 - (Math.max(100 - yr, Math.min(100 + yr, v)) - (100 - yr)) / (2 * yr)) * (H - pt - pb);
-  const cx = X(0), cy = Y(100);
-  const q = (x, y, w, h, c) => `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${c}" opacity="0.08"/>`;
-  let out = q(cx, pt, W - pr - cx, cy - pt, '#2bd576')      // trên-phải: Dẫn dắt
-          + q(pl, pt, cx - pl, cy - pt, '#e3b341')          // trên-trái: Suy yếu
-          + q(cx, cy, W - pr - cx, H - pb - cy, '#4aa3ff')  // dưới-phải: Hồi phục
-          + q(pl, cy, cx - pl, H - pb - cy, '#ff5b6e');     // dưới-trái: Tụt hậu
-  out += `<line x1="${pl}" y1="${cy.toFixed(1)}" x2="${W - pr}" y2="${cy.toFixed(1)}" stroke="#39434f" stroke-dasharray="3,3"/>`
-       + `<line x1="${cx.toFixed(1)}" y1="${pt}" x2="${cx.toFixed(1)}" y2="${H - pb}" stroke="#39434f" stroke-dasharray="3,3"/>`;
-  for (const s of sectors) {
-    const col = PHASE_META[s.phase][1];
-    if (s.trail && s.trail.length > 1) {
-      out += `<polyline points="${s.trail.map(t => X(t[1]).toFixed(1) + ',' + Y(t[0]).toFixed(1)).join(' ')}"
-        fill="none" stroke="${col}" stroke-width="1" opacity="0.35"/>`;
-    }
-    const r = s.is_hpa ? 7 : 4.5;
-    out += `<circle cx="${X(s.mom).toFixed(1)}" cy="${Y(s.rs).toFixed(1)}" r="${r}" fill="${col}"${s.is_hpa ? ' stroke="#fff" stroke-width="2"' : ''}/>`;
-    const nm = s.name.length > 14 ? s.name.slice(0, 13) + '…' : s.name;
-    out += `<text x="${(X(s.mom) + 8).toFixed(1)}" y="${(Y(s.rs) + 3).toFixed(1)}" font-size="9.5"
-      fill="${s.is_hpa ? '#fff' : '#8a97a6'}"${s.is_hpa ? ' font-weight="bold"' : ''}>${nm}</text>`;
-  }
-  out += `<text x="${W - pr - 4}" y="${pt + 11}" text-anchor="end" font-size="9.5" font-weight="700" fill="#2bd576">DẪN DẮT</text>`
-       + `<text x="${pl + 4}" y="${pt + 11}" font-size="9.5" font-weight="700" fill="#e3b341">SUY YẾU</text>`
-       + `<text x="${W - pr - 4}" y="${H - pb - 5}" text-anchor="end" font-size="9.5" font-weight="700" fill="#4aa3ff">HỒI PHỤC</text>`
-       + `<text x="${pl + 4}" y="${H - pb - 5}" font-size="9.5" font-weight="700" fill="#ff5b6e">TỤT HẬU</text>`;
-  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">${out}</svg>`;
-}
-function renderSectors() {
-  if (!$('sectorTable')) return;
-  if (!SECTORS || !(SECTORS.sectors || []).length) {
-    $('sectorHero').innerHTML = '<div class="muted small">Chưa có dữ liệu chu kỳ ngành — updater tính 1 lần/ngày sau giờ đóng cửa (~15:45).</div>';
-    $('rrgChart').innerHTML = ''; $('sectorTable').innerHTML = ''; $('sectorNote').textContent = '';
-    return;
-  }
-  const ss = SECTORS.sectors;
-  const chip = p => `<span class="phz ${p}">${PHASE_META[p][0]}</span>`;
-  const mine = ss.find(s => s.is_hpa);
-  if (mine) {
-    const talk = {
-      lead: 'dòng tiền đang ưu tiên ngành này — thuận lợi cho HPA.',
-      improve: 'dòng tiền bắt đầu quay lại — thường là giai đoạn sớm của sóng ngành.',
-      weak: 'ngành vẫn mạnh hơn thị trường nhưng đà chậm lại — cẩn trọng phần cuối sóng.',
-      lag: 'dòng tiền đang rời khỏi ngành — ngược gió cho HPA.',
-    }[mine.phase];
-    $('sectorHero').innerHTML = `<div class="fg"><div class="fg-l">Ngành của HPA · ${mine.name}</div>
-      <div class="fg-v">${chip(mine.phase)} <span class="muted small">RS ${mine.rs} · đà ${mine.mom > 0 ? '+' : ''}${mine.mom}% · ${mine.breadth50}% mã trên MA50</span></div>
-      <div class="muted small" style="margin-top:4px">${talk}</div></div>`;
-  } else {
-    $('sectorHero').innerHTML = `<div class="muted small">Ngành của HPA (${SECTORS.hpa_industry || '—'}) chưa đủ mã thanh khoản trên sàn để tính riêng — tham khảo bức tranh chung bên dưới.</div>`;
-  }
-  $('rrgChart').innerHTML = rrgSVG(ss);
-  let html = '<thead><tr><th>Ngành</th><th>Pha</th><th>RS</th><th>Đà 21p</th><th>&gt;MA50</th></tr></thead><tbody>';
-  html += ss.map(s => `<tr class="${s.is_hpa ? 'me' : ''}">
-    <td>${s.name}<div class="muted" style="font-size:10px">${(s.top || []).join(' · ')}</div></td>
-    <td>${chip(s.phase)}</td><td>${s.rs}</td>
-    <td class="${cls(s.mom)}">${s.mom > 0 ? '+' : ''}${s.mom}%</td><td>${s.breadth50}%</td></tr>`).join('');
-  $('sectorTable').innerHTML = html + '</tbody>';
-  $('sectorNote').textContent = `RS = sức mạnh giá ngành so với VNINDEX (≥100 là mạnh hơn trung bình 3 tháng); Đà = thay đổi RS trong 21 phiên; đuôi mờ = dấu vết 8 tuần. Chu kỳ thường xoay: Hồi phục → Dẫn dắt → Suy yếu → Tụt hậu. Số liệu ngày ${SECTORS.date}, tính sau giờ đóng cửa.`;
-}
-
 /* ===================== Chu kỳ ngành chăn nuôi (cơ bản: lợn vs thức ăn) ===================== */
 function agriChartSVG(S) {
   const t = S.t, n = t.length;
@@ -363,15 +279,18 @@ function agriChartSVG(S) {
     ['ratio', 'Lợn/Thức ăn (biên CN)', '#e08a00', 2.4],
     ['hpa',   'Giá HPA',               '#0f7b46', 2.0],
   ];
-  const vals = specs.flatMap(([k]) => S[k]).filter(v => v != null);
+  const PEER_COLORS = { DBC: '#8e44ad', BAF: '#2f6db3' };
+  const lines = specs.map(([k, , c, w]) => [S[k] || [], c, w]);
+  for (const [p, pv] of Object.entries(S.peers || {})) lines.push([pv, PEER_COLORS[p] || '#999', 1.2]);
+  const vals = lines.flatMap(([arr]) => arr).filter(v => v != null);
   const lo = Math.min(...vals), hi = Math.max(...vals);
   const W = 520, H = 230, pl = 8, pr = 8, pt = 10, pb = 20;
   const X = i => pl + i / (n - 1 || 1) * (W - pl - pr);
   const Y = v => pt + (1 - (v - lo) / (hi - lo || 1)) * (H - pt - pb);
   let out = `<line x1="${pl}" y1="${Y(100).toFixed(1)}" x2="${W - pr}" y2="${Y(100).toFixed(1)}" stroke="#ccc" stroke-dasharray="3,3"/>`;
-  for (const [k, , col, wd] of specs) {
+  for (const [arr, col, wd] of lines) {
     let d = '', pen = false;
-    (S[k] || []).forEach((v, i) => {
+    (arr || []).forEach((v, i) => {
       if (v == null) { pen = false; return; }
       d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1); pen = true;
     });
@@ -410,9 +329,18 @@ function renderAgri() {
     ['13 tuần', `${st.ratio_chg_13w > 0 ? '+' : ''}${st.ratio_chg_13w}% · ${dirTxt}`],
   ].map(([k, v]) => `<div class="fg"><div class="fg-l">${k}</div><div class="fg-v">${v}</div></div>`).join('');
   $('agriChart').innerHTML = agriChartSVG(AGRI.series);
-  $('agriLegend').innerHTML = [['#e08a00', 'Lợn/Thức ăn (biên)'], ['#c0392b', 'Giá lợn'], ['#7f8c8d', 'Thức ăn'], ['#0f7b46', 'HPA']]
+  const peerCols = { DBC: '#8e44ad', BAF: '#2f6db3' };
+  $('agriLegend').innerHTML = [['#e08a00', 'Lợn/Thức ăn (biên)'], ['#c0392b', 'Giá lợn'], ['#7f8c8d', 'Thức ăn'], ['#0f7b46', 'HPA'],
+      ...Object.keys(AGRI.series.peers || {}).map(p => [peerCols[p] || '#999', p])]
     .map(([c, l]) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:3px;background:${c};display:inline-block;border-radius:2px"></i>${l}</span>`).join('');
-  $('agriNote').innerHTML = `${talk}<br>${corr}<br><span class="muted">${AGRI.biz}<br>${AGRI.proxy_note} Chuẩn hóa gốc=100 tại ${AGRI.series.t[0]}.</span>`;
+  const pc = st.peer_corr || {};
+  const peerTxt = Object.entries(pc).map(([p, c]) => {
+    if (c.r == null) return null;
+    const strength = Math.abs(c.r) >= 0.6 ? 'chặt' : Math.abs(c.r) >= 0.4 ? 'khá' : 'yếu';
+    return `<b>${p}</b> ${c.lag > 0 ? `— chu kỳ dẫn trước ~${c.lag} tuần` : '— đồng pha'}, r=${c.r} (${strength})`;
+  }).filter(Boolean).join(' · ');
+  const peerLine = peerTxt ? `<br>Kiểm chứng bằng công ty cùng mô hình 3F (cám + trại lợn, đủ 3 năm lịch sử): ${peerTxt}.` : '';
+  $('agriNote').innerHTML = `${talk}<br>${corr}${peerLine}<br><span class="muted">${AGRI.biz}<br>${AGRI.proxy_note} Chuẩn hóa gốc=100 tại ${AGRI.series.t[0]}.</span>`;
 }
 
 function renderChart() {
@@ -749,7 +677,7 @@ function importData(file) {
   fr.readAsText(file);
 }
 
-function renderAll() { renderOverview(); renderTrades(); renderDividends(); renderFundamentals(); renderSectors(); renderAgri();
+function renderAll() { renderOverview(); renderTrades(); renderDividends(); renderFundamentals(); renderAgri();
   if (!$('tab-chart').hidden) renderChart(); }
 
 /* ===================== Init ===================== */
