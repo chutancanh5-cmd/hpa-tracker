@@ -398,7 +398,10 @@ function renderAgri() {
     ? (st.ratio_chg_13w < -2 ? 'Biên chăn nuôi thấp và còn thu hẹp — pha khó khăn; đàn nái giảm dần, chờ tín hiệu tạo đáy.'
                              : 'Biên thấp nhưng ngừng xấu đi — vùng đáy chu kỳ hay xuất hiện ở đây, đáng theo dõi để đón sóng hồi.')
     : 'Biên chăn nuôi ở vùng trung tính — chu kỳ chưa nghiêng hẳn về hướng nào.';
-  const corr = (st.best_r != null && Math.abs(st.best_r) >= 0.4)
+  const hpaWeeks = (AGRI.series.hpa || []).filter(v => v != null).length;
+  const corr = hpaWeeks < 40
+    ? `HPA mới có ~${hpaWeeks} tuần lịch sử giá — chưa đủ để đo tương quan với chu kỳ một cách tin cậy; phần này sẽ tự hoàn thiện khi cổ phiếu giao dịch lâu hơn.`
+    : (st.best_r != null && Math.abs(st.best_r) >= 0.4)
     ? `Tỷ số lợn/thức ăn <b>dẫn trước giá HPA ~${st.best_lag_w} tuần</b> (tương quan r=${st.best_r}; cùng thời điểm r=${st.corr_lag0}).`
     : `Tương quan với giá HPA còn yếu (r=${st.best_r ?? '—'}) — giá HPA đang chịu thêm yếu tố ngoài chu kỳ (thanh khoản UPCOM, tin doanh nghiệp).`;
   $('agriFacts').innerHTML = [
