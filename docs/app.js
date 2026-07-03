@@ -271,7 +271,11 @@ function renderFundamentals() {
 }
 
 /* ===================== Chu kỳ ngành chăn nuôi (cơ bản: lợn vs thức ăn) ===================== */
-function agriChartSVG(S) {
+const KEY_AGRIVIS = 'hpa_agri_vis_v1';
+function agriVis() {
+  try { return JSON.parse(localStorage.getItem(KEY_AGRIVIS)) || {}; } catch { return {}; }
+}
+function agriChartSVG(S, vis = {}) {
   const t = S.t, n = t.length;
   const specs = [
     ['hog',   'Giá lợn (CME)',        '#c0392b', 1.3],
@@ -280,9 +284,12 @@ function agriChartSVG(S) {
     ['hpa',   'Giá HPA',               '#0f7b46', 2.0],
   ];
   const PEER_COLORS = { DBC: '#8e44ad', BAF: '#2f6db3' };
-  const lines = specs.map(([k, , c, w]) => [S[k] || [], c, w]);
-  for (const [p, pv] of Object.entries(S.peers || {})) lines.push([pv, PEER_COLORS[p] || '#999', 1.2]);
+  const lines = specs.filter(([k]) => vis[k] !== false).map(([k, , c, w]) => [S[k] || [], c, w]);
+  for (const [p, pv] of Object.entries(S.peers || {})) {
+    if (vis[p] !== false) lines.push([pv, PEER_COLORS[p] || '#999', 1.2]);
+  }
   const vals = lines.flatMap(([arr]) => arr).filter(v => v != null);
+  if (!vals.length) return '<p class="muted small" style="padding:24px 0;text-align:center">Bật ít nhất một đường (bấm vào chú giải bên dưới).</p>';
   const lo = Math.min(...vals), hi = Math.max(...vals);
   const W = 520, H = 230, pl = 8, pr = 8, pt = 10, pb = 20;
   const X = i => pl + i / (n - 1 || 1) * (W - pl - pr);
@@ -328,11 +335,23 @@ function renderAgri() {
     ['Vị trí 3 năm', `${st.ratio_pctile_3y}% · ${zone}`],
     ['13 tuần', `${st.ratio_chg_13w > 0 ? '+' : ''}${st.ratio_chg_13w}% · ${dirTxt}`],
   ].map(([k, v]) => `<div class="fg"><div class="fg-l">${k}</div><div class="fg-v">${v}</div></div>`).join('');
-  $('agriChart').innerHTML = agriChartSVG(AGRI.series);
+  const vis = agriVis();
+  $('agriChart').innerHTML = agriChartSVG(AGRI.series, vis);
   const peerCols = { DBC: '#8e44ad', BAF: '#2f6db3' };
-  $('agriLegend').innerHTML = [['#e08a00', 'Lợn/Thức ăn (biên)'], ['#c0392b', 'Giá lợn'], ['#7f8c8d', 'Thức ăn'], ['#0f7b46', 'HPA'],
-      ...Object.keys(AGRI.series.peers || {}).map(p => [peerCols[p] || '#999', p])]
-    .map(([c, l]) => `<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:3px;background:${c};display:inline-block;border-radius:2px"></i>${l}</span>`).join('');
+  const items = [['ratio', '#e08a00', 'Lợn/Thức ăn (biên)'], ['hog', '#c0392b', 'Giá lợn'],
+                 ['feed', '#7f8c8d', 'Thức ăn'], ['hpa', '#0f7b46', 'HPA'],
+                 ...Object.keys(AGRI.series.peers || {}).map(p => [p, peerCols[p] || '#999', p])];
+  $('agriLegend').innerHTML = items.map(([k, c, l]) =>
+    `<button type="button" class="lgt${vis[k] === false ? ' off' : ''}" data-k="${k}">
+       <span class="ck">${vis[k] === false ? '☐' : '☑'}</span><i style="background:${c}"></i>${l}</button>`).join('');
+  $('agriLegend').onclick = e => {
+    const b = e.target.closest('[data-k]');
+    if (!b) return;
+    const v = agriVis();
+    v[b.dataset.k] = v[b.dataset.k] === false;   // đảo trạng thái (mặc định = hiện)
+    localStorage.setItem(KEY_AGRIVIS, JSON.stringify(v));
+    renderAgri();
+  };
   const pc = st.peer_corr || {};
   const peerTxt = Object.entries(pc).map(([p, c]) => {
     if (c.r == null) return null;
