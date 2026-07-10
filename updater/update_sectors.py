@@ -30,7 +30,7 @@ TOP_N = 5            # so ma / nganh
 MIN_VAL_BN = 1.0     # thanh khoan toi thieu (ty VND/phien) de xet
 HIST_DAYS = 320      # ~15 thang lich su
 CHUNK = 25
-PACE = 0.7           # giay nghi giua 2 lan tai lich su (tranh rate limit tier guest)
+PACE = 0.3           # giay nghi giua 2 lan tai lich su (vnstock_data paid Golden = 500 req/phut)
 
 
 def log(*a):
@@ -121,7 +121,7 @@ def fetch_liquidity(syms):
                     out[s] = v / 1e3                          # -> ty dong
         except Exception as e:
             log("price_board lo loi:", str(e)[:80])
-        time.sleep(0.25)
+        time.sleep(0.2)
     return out
 
 

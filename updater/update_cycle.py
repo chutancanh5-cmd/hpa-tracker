@@ -117,7 +117,7 @@ def main():
     for sym in ["HPA"] + PEERS:
         try:
             stocks[sym] = stock_weekly(sym)
-            time.sleep(0.6)
+            time.sleep(0.3)
         except Exception as e:
             log(f"vnstock {sym} loi:", str(e)[:80])
     if "HPA" not in stocks:
