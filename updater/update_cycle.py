@@ -73,7 +73,10 @@ def yahoo_weekly(sym):
 
 def stock_weekly(sym):
     """Gia co phieu VN theo tuan (close cuoi tuan) tu vnstock, 3 nam."""
-    from vnstock.api.quote import Quote
+    try:
+        from vnstock_data.api.quote import Quote
+    except Exception:
+        from vnstock.api.quote import Quote
     start = (vn_now().date() - dt.timedelta(days=WEEKS * 7 + 30)).isoformat()
     df = Quote(symbol=sym, source="VCI").history(start=start, end=vn_now().date().isoformat(), interval="1D")
     df = df.rename(columns=str.lower)

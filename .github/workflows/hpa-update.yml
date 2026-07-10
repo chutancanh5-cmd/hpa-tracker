@@ -27,6 +27,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Cache trang thai license vnstock (~/.vnstock)
+        uses: actions/cache@v4
+        with:
+          path: ~/.vnstock
+          key: vnstock-license-v1
       - uses: actions/cache@v4
         id: venv
         with:
@@ -36,6 +41,16 @@ jobs:
         if: steps.venv.outputs.cache-hit != 'true'
         run: python -m venv .venv && .venv/bin/pip install -r updater/requirements.txt
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Cai vnstock_data (paid) neu chua co trong venv
+        run: |
+          if ! .venv/bin/python -c "import vnstock_data" 2>/dev/null; then
+            echo "vnstock_data chua co, cai qua CLI installer chinh thuc..."
+            wget -qO vnstock-cli-installer.run https://vnstocks.com/files/vnstock-cli-installer.run
+            chmod +x vnstock-cli-installer.run
+            ./vnstock-cli-installer.run -- --non-interactive --api-key "$VNSTOCK_API_KEY" --venv-path "$PWD/.venv" --language en
+          else
+            echo "vnstock_data da co san trong venv cache, bo qua installer."
+          fi
       - name: Git identity
         run: |
           git config user.name "hpa-bot"

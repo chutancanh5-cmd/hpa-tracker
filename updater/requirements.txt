@@ -2,12 +2,10 @@
 vnstock>=4.0.3
 pandas
 
-# --- Gói PREMIUM của vnstock (tùy chọn) ---
-# Cài qua Vnstock Installer hoặc pip. Khi đã đăng ký key trả phí, tier tự lên "golden"
-# (500 req/phút) và áp dụng cho CẢ base vnstock trong updater — không cần đổi code.
-# vnstock_data
-# vnstock_ta
-# vnstock_news
-# vnstock_pipeline
-# Thư viện phụ mà các gói premium cần (nếu thiếu sẽ lỗi import):
-#   unidecode  html2text  scipy>=1.14.0  websockets>=12.0
+# --- Gói PREMIUM của vnstock (vnstock_data, vnstock_ta, ...) ---
+# QUAN TRỌNG: chỉ set VNSTOCK_API_KEY và import `vnstock` (bản free) KHÔNG mở khóa tier
+# trả phí — vnstock tự cảnh báo free/sponsor là 2 gói riêng. Phải import `vnstock_data`
+# trực tiếp mới có hiệu lực. update_hpa.py/update_sectors.py/update_cycle.py đã đổi sang
+# soft-import (thử vnstock_data truoc, fallback vnstock). Cài vnstock_data trong CI qua
+# vnstock-cli-installer.run --non-interactive (xem step trong hpa-update.yml), không cần
+# khai báo ở đây vì installer cài thẳng vào .venv, không qua pip install -r file này.
