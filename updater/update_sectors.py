@@ -74,7 +74,10 @@ def _num(x):
 
 def fetch_universe():
     """-> (sym2ind: {sym: (icb_code, icb_name)} cap 2, hpa_ind: (code, name))."""
-    from vnstock.api.listing import Listing
+    try:
+        from vnstock_data.api.listing import Listing
+    except Exception:
+        from vnstock.api.listing import Listing
     L = Listing(source="VCI")
     ind = L.symbols_by_industries()
     lv2 = ind[ind["icb_level"].astype(int) == 2]
@@ -98,7 +101,10 @@ def fetch_universe():
 
 def fetch_liquidity(syms):
     """-> {sym: gia_tri_khop_ty} tu price_board (phien gan nhat)."""
-    from vnstock.api.trading import Trading
+    try:
+        from vnstock_data.api.trading import Trading
+    except Exception:
+        from vnstock.api.trading import Trading
     T = Trading(source="VCI")
     out = {}
     syms = sorted(syms)
@@ -120,7 +126,10 @@ def fetch_liquidity(syms):
 
 
 def fetch_history(sym, start):
-    from vnstock.api.quote import Quote
+    try:
+        from vnstock_data.api.quote import Quote
+    except Exception:
+        from vnstock.api.quote import Quote
     df = Quote(symbol=sym, source="VCI").history(start=start, end=vn_now().date().isoformat(), interval="1D")
     df = df.rename(columns=str.lower)
     import pandas as pd

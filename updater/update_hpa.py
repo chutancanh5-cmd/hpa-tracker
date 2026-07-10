@@ -55,9 +55,28 @@ def num(x):
         return None
 
 
-def get_stock():
-    from vnstock import Vnstock
-    return Vnstock().stock(symbol=SYMBOL, source=SOURCE)
+def get_stock(symbol=None):
+    """Tra ve object co .quote/.company/.listing/.finance - dung vnstock_data (paid) neu co,
+    fallback ve wrapper Vnstock() cua goi vnstock (free) neu khong.
+    LUU Y: .finance luon dung vnstock (free) - schema cua vnstock_data.Finance.ratio()
+    khac hoan toan (wide-format pe/pb/roe truc tiep) so voi item_en long-format ma
+    ratio_kv() dang doc, con vnstock (free) Finance.ratio() van tra dung item_en."""
+    sym = symbol or SYMBOL
+    try:
+        from vnstock_data.api.quote import Quote
+        from vnstock_data.api.company import Company
+        from vnstock_data.api.listing import Listing
+        from vnstock.api.financial import Finance
+
+        class _Stock:
+            quote = Quote(symbol=sym, source=SOURCE)
+            company = Company(symbol=sym, source=SOURCE)
+            listing = Listing(source=SOURCE)
+            finance = Finance(source=SOURCE, symbol=sym)
+        return _Stock()
+    except Exception:
+        from vnstock import Vnstock
+        return Vnstock().stock(symbol=sym, source=SOURCE)
 
 
 # ----------------------------------------------------------------------------
@@ -316,15 +335,14 @@ def fetch_peers(start_date):
     peers = []
     peer_hist = {}
     try:
-        from vnstock import Vnstock
-        listing = Vnstock().stock(symbol=SYMBOL, source=SOURCE).listing
+        listing = get_stock().listing
         sym = listing.symbols_by_industries()
         same = sym[sym["industry_code"].astype(str) == PEER_INDUSTRY_CODE]
         syms = [x for x in same["symbol"].tolist() if x != SYMBOL]
         syms = [x for x in syms if len(str(x)) == 3][:MAX_PEERS]
         for code in syms:
             try:
-                st = Vnstock().stock(symbol=code, source=SOURCE)
+                st = get_stock(code)
                 ov = st.company.overview()
                 d = ov.iloc[0].to_dict() if len(ov) else {}
                 mcap = num(d.get("market_cap"))
@@ -360,8 +378,7 @@ def fetch_vnindex(start_date):
     """Lay lich su VNINDEX -> {date: close}."""
     out = {}
     try:
-        from vnstock import Vnstock
-        vi = Vnstock().stock(symbol="VNINDEX", source=SOURCE).quote.history(
+        vi = get_stock("VNINDEX").quote.history(
             start=start_date, end=date.today().isoformat(), interval="1D")
         for _, r in vi.iterrows():
             t = r["time"]
