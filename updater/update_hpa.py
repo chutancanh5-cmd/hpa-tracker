@@ -34,8 +34,8 @@ VN_TZ = timezone(timedelta(hours=7))
 
 # So peer toi da lay (cung nganh) de so sanh
 MAX_PEERS = 12
-# Cap nhat nganh nay (industry_code 12 = Nong - Lam - Ngu)
-PEER_INDUSTRY_CODE = "12"
+# Cap nhat nganh nay (icb_code 3500 = Thuc pham va do uong, ICB level 2)
+PEER_INDUSTRY_CODE = "3500"
 
 
 def log(*a):
@@ -328,7 +328,12 @@ def adjusted_history(hist, dividends):
 
 
 def fetch_peers(start_date):
-    """Lay peer cung nganh (industry 12) + chi so so sanh + lich su gia (dung chi so nganh).
+    """Lay peer cung nganh (ICB icb_code) + chi so so sanh + lich su gia (dung chi so nganh).
+
+    symbols_by_industries() cua vnstock.api.listing.Listing tra ve icb_code/icb_name
+    (khong phai industry_code kieu cu tu Vnstock().stock().listing da deprecated),
+    moi symbol co nhieu dong (1 dong / icb_level 1-4) nen loc truc tiep theo icb_code
+    la du, khong can loc them theo icb_level.
 
     Tra ve (peers, peer_hist) voi peer_hist = {symbol: {date: close}}.
     """
@@ -337,7 +342,7 @@ def fetch_peers(start_date):
     try:
         listing = get_stock().listing
         sym = listing.symbols_by_industries()
-        same = sym[sym["industry_code"].astype(str) == PEER_INDUSTRY_CODE]
+        same = sym[sym["icb_code"].astype(str) == PEER_INDUSTRY_CODE]
         syms = [x for x in same["symbol"].tolist() if x != SYMBOL]
         syms = [x for x in syms if len(str(x)) == 3][:MAX_PEERS]
         for code in syms:
