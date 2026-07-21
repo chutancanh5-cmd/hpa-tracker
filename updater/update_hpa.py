@@ -557,12 +557,28 @@ def vn_market_open():
 MARKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last_full_date")
 
 
+MAX_FULL_RETRY = 3       # so lan chay full toi da / ngay khi ban full bi suy giam
+
+
 def _read_marker():
+    """Noi dung marker: 'YYYY-MM-DD' (full sach) hoac 'YYYY-MM-DD#n' (full loi, da thu n lan)."""
     try:
         with open(MARKER, encoding="utf-8") as f:
             return f.read().strip()
     except Exception:
         return ""
+
+
+def _marker_date(raw=None):
+    return (raw if raw is not None else _read_marker()).split("#")[0]
+
+
+def _marker_tries(raw=None):
+    raw = raw if raw is not None else _read_marker()
+    try:
+        return int(raw.split("#")[1])
+    except (IndexError, ValueError):
+        return 0
 
 
 def _write_marker(d):
@@ -587,10 +603,16 @@ def main():
     force = "--force" in sys.argv
     light = "--light" in sys.argv
     do_full_marker = False
+    degraded = []
 
     # --auto: tu quyet dinh full/light/skip theo GIO VIET NAM (truoc khi import vnstock)
     if auto:
-        full_due = (_read_marker() != vn_today()) and vn_now().hour >= 8
+        _mk = _read_marker()
+        # Chay lai full neu hom nay chua chay, HOAC lan full hom nay bi suy giam
+        # (fetch nang hong) va van con luot thu -- co gioi han de khong thanh vong lap
+        # */15 phut goi lai toan bo peers/fundamentals va tu gay rate limit.
+        full_due = vn_now().hour >= 8 and (
+            _marker_date(_mk) != vn_today() or 0 < _marker_tries(_mk) < MAX_FULL_RETRY)
         if full_due:
             light = False
             do_full_marker = True
@@ -630,12 +652,32 @@ def main():
         })
         log("light: chi cap nhat gia + ky thuat (giu peers/benchmark/news cu)")
     else:
+        prev_data = load_existing()
+        degraded = []        # phan nang nao tai hong -> khong danh dau "da full hom nay"
+
         ov = fetch_overview(s)
         fund = fetch_fundamentals(s, num(ov.get("market_cap")), cur)
         divs = fetch_dividends(s)
         log("dividends:", len(divs))
         peers, peer_hist = fetch_peers(start_date)
         log("peers:", len(peers))
+
+        # Moi fetch nang deu nuot loi thanh rong, roi 'data' ben duoi GHI DE ca file.
+        # Nguy hiem nhat la divs=[]: adjusted_history() thanh no-op nen adj_history
+        # tut ve dung bang price_history -> app hien "loi da dieu chinh co tuc" thap
+        # hon thuc te ma khong co dau hieu gi. Giu ban cu thay vi xoa.
+        for key, got in (("fundamentals", fund), ("dividends", divs), ("peers", peers)):
+            keep = prev_data.get(key)
+            if not got and keep:
+                degraded.append(key)
+                log(f"CANH BAO: {key} tai hong -> giu ban cu ({len(keep)} muc)")
+        if not fund and prev_data.get("fundamentals"):
+            fund = prev_data["fundamentals"]
+        if not divs and prev_data.get("dividends"):
+            divs = prev_data["dividends"]
+        if not peers and prev_data.get("peers"):
+            peers = prev_data["peers"]
+
         vnindex = fetch_vnindex(start_date)
         benchmark = build_benchmark(hist, vnindex, peer_hist)
         log("benchmark dates:", len(benchmark.get("dates", [])), "| peers in index:", benchmark.get("n_peers"))
@@ -675,8 +717,21 @@ def main():
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     log("da ghi", OUT, f"({os.path.getsize(OUT)//1024} KB)")
 
+    # Truoc day marker duoc ghi VO DIEU KIEN, nen mot lan full 8h sang tai hong se khoa
+    # app o trang thai suy giam suot 24h (cac lan --light sau do chi cap nhat gia, giu
+    # nguyen phan nang cu). Gio ban full loi se duoc thu lai, toi da MAX_FULL_RETRY lan.
     if do_full_marker:
-        _write_marker(vn_today())
+        if not degraded:
+            _write_marker(vn_today())
+        else:
+            tries = (_marker_tries() if _marker_date() == vn_today() else 0) + 1
+            _write_marker(f"{vn_today()}#{tries}")
+            if tries < MAX_FULL_RETRY:
+                log(f"full bi suy giam ({', '.join(degraded)}) -> se thu lai "
+                    f"(lan {tries}/{MAX_FULL_RETRY})")
+            else:
+                log(f"full bi suy giam ({', '.join(degraded)}) sau {tries} lan thu "
+                    f"-> dung thu hom nay, giu du lieu cu")
 
     if "--push" in sys.argv:
         git_push()

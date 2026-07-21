@@ -64,6 +64,19 @@ def should_run():
     return after_close                                 # cho het phien
 
 
+def describe_exc(e, n=120):
+    """vnstock_data boc moi loi mang trong tenacity RetryError (thieu reraise=True),
+    nen str(e) chi in dia chi Future. Boc ra exception that de log con phan biet duoc."""
+    inner = e
+    try:
+        la = getattr(e, "last_attempt", None)
+        if la is not None and la.failed:
+            inner = la.exception() or e
+    except Exception:
+        inner = e
+    return f"{type(inner).__name__}: {inner}"[:n]
+
+
 def _num(x):
     try:
         f = float(x)
@@ -100,29 +113,43 @@ def fetch_universe():
 
 
 def fetch_liquidity(syms):
-    """-> {sym: gia_tri_khop_ty} tu price_board (phien gan nhat)."""
+    """-> ({sym: gia_tri_khop_ty}, so_lo_that_bai) tu price_board (phien gan nhat).
+
+    Mot lo hong lam ~25 ma bi coi nhu thanh khoan 0 -> chung roi khoi 'groups' ->
+    nganh tut xuong duoi 3 ma -> BIEN MAT khoi RRG ma khong co dau hieu gi. Vi vay
+    thu lai 1 lan va tra ve so lo that bai de main() biet ban nay khong day du.
+    """
     try:
         from vnstock_data.api.trading import Trading
     except Exception:
         from vnstock.api.trading import Trading
     T = Trading(source="VCI")
     out = {}
+    failed = 0
     syms = sorted(syms)
     for i in range(0, len(syms), CHUNK):
         part = syms[i:i + CHUNK]
-        try:
-            pb = T.price_board(part)
-            cols = list(pb.columns)
-            for _, r in pb.iterrows():
-                d = {("__".join(str(x) for x in c) if isinstance(c, tuple) else str(c)): r[c] for c in cols}
-                s = str(d.get("listing__symbol", "")).upper()
-                v = _num(d.get("match__accumulated_value"))   # don vi: TRIEU dong
-                if s and v:
-                    out[s] = v / 1e3                          # -> ty dong
-        except Exception as e:
-            log("price_board lo loi:", str(e)[:80])
-        time.sleep(0.2)
-    return out
+        # Pace 0.25s: nam trong khoang 0.2-0.3s ma commit "siet pace" tren main da chon,
+        # nen giu duoc y do toc do do ma van co retry ben duoi.
+        for attempt in range(2):
+            try:
+                pb = T.price_board(part)
+                cols = list(pb.columns)
+                for _, r in pb.iterrows():
+                    d = {("__".join(str(x) for x in c) if isinstance(c, tuple) else str(c)): r[c] for c in cols}
+                    s = str(d.get("listing__symbol", "")).upper()
+                    v = _num(d.get("match__accumulated_value"))   # don vi: TRIEU dong
+                    if s and v:
+                        out[s] = v / 1e3                          # -> ty dong
+                break
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(3)                                 # co the dinh rate limit
+                else:
+                    failed += 1
+                    log(f"price_board lo {i}-{i+len(part)} loi:", describe_exc(e))
+        time.sleep(0.25)
+    return out, failed
 
 
 def fetch_history(sym, start):
@@ -145,10 +172,13 @@ def main():
 
     try:
         sym2ind, hpa_ind = fetch_universe()
-        liq = fetch_liquidity(sym2ind.keys())
+        liq, liq_failed = fetch_liquidity(sym2ind.keys())
     except Exception as e:
-        log("khong lay duoc universe (rate limit?) -> giu ban cu:", str(e)[:80])
+        log("khong lay duoc universe (rate limit?) -> giu ban cu:", describe_exc(e))
         return
+    if liq_failed:
+        log(f"CANH BAO: {liq_failed} lo price_board that bai -> thanh khoan thieu, "
+            f"co the mat nganh")
 
     # chon top thanh khoan moi nganh
     groups = {}
@@ -167,7 +197,7 @@ def main():
     try:
         vni = fetch_history("VNINDEX", start)
     except Exception as e:
-        log("khong lay duoc VNINDEX (rate limit?) -> giu ban cu:", str(e)[:80])
+        log("khong lay duoc VNINDEX (rate limit?) -> giu ban cu:", describe_exc(e))
         return
     log(f"VNINDEX: {len(vni)} phien")
 
@@ -182,7 +212,7 @@ def main():
                     break
                 except Exception as e:
                     if attempt:
-                        log(f"{s} loi: {str(e)[:60]}")
+                        log(f"{s} loi: {describe_exc(e, 80)}")
                     else:
                         time.sleep(6)          # dinh rate limit -> nghi dai roi thu lai
             time.sleep(PACE)
@@ -190,10 +220,13 @@ def main():
 
     sectors = []
     for (code, name), syms in picks.items():
-        cols = [closes[s] for s in syms if s in closes and len(closes[s]) > 130]
-        if len(cols) < 3:
+        # Chi dung cac ma DU DAI. Truoc day DataFrame duoc dung tu *moi* ma tai duoc,
+        # nen 1 ma moi niem yet (it phien) se de lai NaN dau chuoi -> dropna(how="any")
+        # cat cut ca nganh -> len(df) < 130 -> nganh bien mat khoi RRG.
+        good = [s for s in syms if s in closes and len(closes[s]) > 130]
+        if len(good) < 3:
             continue
-        df = pd.DataFrame({s: closes[s] for s in syms if s in closes}).sort_index().ffill()
+        df = pd.DataFrame({s: closes[s] for s in good}).sort_index().ffill()
         df = df.dropna(how="any")
         if len(df) < 130:
             continue
@@ -230,6 +263,23 @@ def main():
         "hpa_industry": hpa_ind[1] if hpa_ind else None,
         "sectors": sectors,
     }
+    # Khong de mot ban CHAY LOI ghi de len ban day du hom truoc: nganh bi mat khong
+    # de lai dau vet nao trong JSON, bieu do RRG van ve "day du" nhung thieu nganh.
+    # Chi chan khi that su co loi tai du lieu (chu khong phai nganh tut hang tu nhien).
+    want = {s for syms in picks.values() for s in syms}
+    missing = sorted(want - set(closes))
+    if liq_failed or missing:
+        log(f"tai thieu: {liq_failed} lo price_board loi, {len(missing)} ma khong co lich su "
+            f"{missing[:8]}")
+        try:
+            prev_n = len((json.load(open(OUT, encoding="utf-8")).get("sectors") or []))
+        except Exception:
+            prev_n = 0
+        if len(sectors) < prev_n:
+            log(f"CHI CO {len(sectors)} nganh < {prev_n} nganh ban cu va co loi tai du lieu "
+                f"-> GIU BAN CU, se thu lai lan sau.")
+            return
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     log(f"OK: {len(sectors)} nganh -> {OUT}")
