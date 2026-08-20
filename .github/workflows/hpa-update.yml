@@ -45,7 +45,8 @@ jobs:
         run: |
           if ! .venv/bin/python -c "import vnstock_data" 2>/dev/null; then
             echo "vnstock_data chua co, cai qua CLI installer chinh thuc..."
-            .venv/bin/pip install -q requests
+            .venv/bin/python -m ensurepip --upgrade -q 2>/dev/null || true
+            .venv/bin/python -m pip install -q requests
             wget -qO vnstock-cli-installer.run https://vnstocks.com/files/vnstock-cli-installer.run
             chmod +x vnstock-cli-installer.run
             ./vnstock-cli-installer.run -- --non-interactive --api-key "$VNSTOCK_API_KEY" --venv-path "$PWD/.venv" --language en
