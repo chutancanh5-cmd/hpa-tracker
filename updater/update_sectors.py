@@ -91,6 +91,10 @@ def fetch_universe():
         from vnstock_data.api.listing import Listing
     except Exception:
         from vnstock.api.listing import Listing
+    # symbols_by_industries() -> is_colab() -> get_hosting_service(), ham nay nem
+    # UnboundLocalError tren CI. Xem updater/vnstock_compat.py.
+    from vnstock_compat import patch_hosting_service
+    patch_hosting_service()
     L = Listing(source="VCI")
     ind = L.symbols_by_industries()
     lv2 = ind[ind["icb_level"].astype(int) == 2]

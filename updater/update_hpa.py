@@ -68,6 +68,12 @@ def get_stock(symbol=None):
         from vnstock_data.api.listing import Listing
         from vnstock.api.financial import Finance
 
+        # Finance() goi symbols_by_industries() -> is_colab() -> get_hosting_service(),
+        # ham nay nem UnboundLocalError tren CI. Khong va thi CA HAI nhanh try/except
+        # duoi day cung chet cung mot cho. Xem updater/vnstock_compat.py.
+        from vnstock_compat import patch_hosting_service
+        patch_hosting_service()
+
         class _Stock:
             quote = Quote(symbol=sym, source=SOURCE)
             company = Company(symbol=sym, source=SOURCE)
