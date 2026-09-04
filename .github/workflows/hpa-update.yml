@@ -17,6 +17,11 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    # Truoc 2026-09-05 job nay KHONG co timeout -> nhan mac dinh 360 phut cua GitHub.
+    # Khi VCI cham (do duoc: 03/09 mot lan chay het 51m8s, binh thuong 22-35s) thi
+    # voi cron */15 va cancel-in-progress: false cac run se xep hang chong len nhau
+    # ma khong ai biet. 14' < 15' cua cron nen toi da chi co 1 run dang chay.
+    timeout-minutes: 14
     env:
       TZ: Asia/Ho_Chi_Minh
       VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
@@ -57,13 +62,19 @@ jobs:
         run: |
           git config user.name "hpa-bot"
           git config user.email "actions@users.noreply.github.com"
+      # Moi buoc co tran rieng, tong < timeout-minutes cua job: mot nguon treo
+      # khong duoc an het phan cua buoc sau (va cua buoc commit o duoi).
       - name: Run updater
+        timeout-minutes: 7
         run: python updater/update_hpa.py --auto --push
       - name: Chu ky nganh (tu gate - 1 lan/ngay sau phien)
+        timeout-minutes: 3
         run: python updater/update_sectors.py || true
       - name: Chu ky chan nuoi co ban (tu gate - 1 lan/ngay)
+        timeout-minutes: 2
         run: python updater/update_cycle.py || true
       - name: Commit full-update marker
+        if: always()
         run: |
           git add docs/data/sectors.json docs/data/agri_cycle.json 2>/dev/null || true
           git add -f updater/.last_full_date || true
@@ -73,7 +84,9 @@ jobs:
             git rebase -X theirs origin/main || git rebase --abort
             git push
           fi
+      # cancelled() = het timeout-minutes (job hoac buoc). Conclusion luc do la
+      # 'cancelled' chu khong phai 'failure' nen `if: failure()` khong bat duoc.
       - name: Bao loi ve Discord
-        if: failure()
+        if: failure() || cancelled()
         run: |
           curl -s -X POST -H "Content-Type: application/json" -d "{\"username\":\"Bot CI\",\"content\":\"❌ Workflow **${{ github.workflow }}** lỗi — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "$DISCORD_WEBHOOK_URL" || true
