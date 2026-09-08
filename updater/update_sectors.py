@@ -32,6 +32,17 @@ HIST_DAYS = 320      # ~15 thang lich su
 CHUNK = 25
 PACE = 0.3           # giay nghi giua 2 lan tai lich su (vnstock_data paid Golden = 500 req/phut)
 
+# Tran thoi gian tu quan ly: VCI hay chan/lam cham IP cloud (xem memory vci-chan-ip-cloud),
+# cac vong tai co the treo qua `timeout-minutes: 3` cua buoc -> runner GIET step ->
+# conclusion 'cancelled' -> `if: failure() || cancelled()` ban bao loi Discord du script
+# co `|| true`. Tu dat deadline < tran cua step de THOAT SACH (exit 0, giu ban cu).
+_START = time.monotonic()
+DEADLINE_S = float(os.environ.get("SECTORS_DEADLINE_S", "150"))
+
+
+def over_budget():
+    return time.monotonic() - _START > DEADLINE_S
+
 
 def log(*a):
     print("[sectors]", *a, flush=True)
@@ -132,6 +143,9 @@ def fetch_liquidity(syms):
     failed = 0
     syms = sorted(syms)
     for i in range(0, len(syms), CHUNK):
+        if over_budget():
+            log(f"het gio o fetch_liquidity ({i}/{len(syms)} ma) -> dung lai")
+            break
         part = syms[i:i + CHUNK]
         # Pace 0.25s: nam trong khoang 0.2-0.3s ma commit "siet pace" tren main da chon,
         # nen giu duoc y do toc do do ma van co retry ben duoi.
@@ -210,6 +224,9 @@ def main():
         for s in syms:
             if s in closes:
                 continue
+            if over_budget():
+                log(f"het gio khi tai lich su ({len(closes)} ma xong) -> giu ban cu, thu lai lan sau.")
+                return
             for attempt in range(2):
                 try:
                     closes[s] = fetch_history(s, start)
