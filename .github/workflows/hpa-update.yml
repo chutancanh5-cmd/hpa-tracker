@@ -67,16 +67,12 @@ jobs:
       - name: Run updater
         timeout-minutes: 7
         run: python updater/update_hpa.py --auto --push
-      - name: Chu ky nganh (tu gate - 1 lan/ngay sau phien)
-        timeout-minutes: 3
-        run: python updater/update_sectors.py || true
-      - name: Chu ky chan nuoi co ban (tu gate - 1 lan/ngay)
-        timeout-minutes: 2
-        run: python updater/update_cycle.py || true
+      # Chu ky nganh + chu ky chan nuoi DA CHUYEN sang .github/workflows/hpa-cycle.yml
+      # (2026-09-16): chung la viec 1 lan/ngay, khong kip 3'/2' o day nen run nao cung
+      # bi chem -> bao loi Discord, va sectors.json ket o 2026-09-07 suot 9 ngay.
       - name: Commit full-update marker
         if: always()
         run: |
-          git add docs/data/sectors.json docs/data/agri_cycle.json 2>/dev/null || true
           git add -f updater/.last_full_date || true
           if git diff --cached --quiet; then echo "khong co thay doi"; else
             git commit -m "state: full-update marker $(date +%F)"

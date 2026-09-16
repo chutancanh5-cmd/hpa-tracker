@@ -186,6 +186,12 @@ def main():
     if not should_run():
         log("bo qua (da co ban moi / chua het phien).")
         return
+    # Tran CUNG: over_budget() ben duoi chi duoc kiem tra GIUA cac vong tai, nen
+    # mot loi goi treo (fetch_universe / price_board / VNINDEX) van di qua no va
+    # an het 3' cua buoc -> runner chem -> ca job do (dung nhu run #1200 ngay
+    # 2026-09-16). Thoat cung o 165s < 180s de con kip in log va giu ban cu.
+    from timebox import arm
+    arm(DEADLINE_S + 15, "sectors")
     import pandas as pd
 
     try:

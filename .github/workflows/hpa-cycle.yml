@@ -1,0 +1,129 @@
+name: hpa-cycle
+# Chu ky NGANH (RRG) + chu ky CHAN NUOI. Ca hai deu la viec 1 LAN/NGAY nhung truoc
+# 2026-09-16 bi nhet vao hpa-update (cron */15) voi timeout 3' va 2'. Hau qua do duoc:
+# sectors.json dung yen tu 2026-09-07 -- quet thanh khoan 704 ma + ~85 chuoi lich su
+# KHONG BAO GIO kip 3' tren IP cloud (VCI lam cham IP cloud, xem memory
+# vci-chan-ip-cloud), nen moi run deu bi runner chem -> 'cancelled' -> bao loi Discord.
+# Tach ra day: chay sau phien, cho han rong rai, khong chen duong nhip 15'.
+on:
+  schedule:
+    - cron: '0 9 * * *'      # 16:00 gio VN - sau ATC 14:45 va sau khi hpa-update xong
+    - cron: '30 10 * * 1-5'  # 17:30 gio VN - lan 2 phong khi lan 1 hong (script tu gate,
+                             # neu lan 1 da xong thi thoat ngay)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Dung chung nhom voi hpa-update de hai workflow khong bao gio push chong nhau.
+concurrency:
+  group: hpa-data
+  cancel-in-progress: false
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    env:
+      TZ: Asia/Ho_Chi_Minh
+      VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      ACCEPT_TC: "tôi đồng ý"
+      SECTORS_DEADLINE_S: "1080"   # 18' -- tran MEM trong script
+      CYCLE_DEADLINE_S: "300"      # 5'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cache trang thai license vnstock (~/.vnstock)
+        uses: actions/cache@v4
+        with:
+          path: ~/.vnstock
+          key: vnstock-license-v1
+      - uses: actions/cache@v4
+        id: venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py312-${{ hashFiles('updater/requirements.txt') }}
+      - name: Cai thu vien (chi khi cache miss)
+        if: steps.venv.outputs.cache-hit != 'true'
+        run: python -m venv --copies .venv && .venv/bin/pip install -r updater/requirements.txt
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Cai vnstock_data (paid) neu chua co trong venv
+        run: |
+          if ! .venv/bin/python -c "import vnstock_data" 2>/dev/null; then
+            echo "vnstock_data chua co, cai qua CLI installer chinh thuc..."
+            .venv/bin/python -m ensurepip --upgrade -q 2>/dev/null || true
+            .venv/bin/python -m pip install -q requests
+            wget -qO vnstock-cli-installer.run https://vnstocks.com/files/vnstock-cli-installer.run
+            chmod +x vnstock-cli-installer.run
+            ./vnstock-cli-installer.run -- --non-interactive --api-key "$VNSTOCK_API_KEY" --venv-path "$PWD/.venv" --language en
+          else
+            echo "vnstock_data da co san trong venv cache, bo qua installer."
+          fi
+      - name: Git identity
+        run: |
+          git config user.name "hpa-bot"
+          git config user.email "actions@users.noreply.github.com"
+      # Ba lop tran, tu trong ra ngoai: tran mem trong script (bo dang giua hai vong
+      # tai, giu ban cu) -> tran cung updater/timebox.py (os._exit(0)) -> timeout cua
+      # buoc. Chi lop ngoai cung moi lam job do, va no khong bao gio nen cham toi.
+      - name: Chu ky nganh (RRG)
+        timeout-minutes: 20
+        continue-on-error: true
+        run: python updater/update_sectors.py || true
+      - name: Chu ky chan nuoi (co ban)
+        timeout-minutes: 6
+        continue-on-error: true
+        run: python updater/update_cycle.py || true
+      - name: Commit du lieu chu ky
+        if: always()
+        run: |
+          git add docs/data/sectors.json docs/data/agri_cycle.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "khong co thay doi"; else
+            git commit -m "cycle: chu ky nganh + chan nuoi $(date +%F)"
+            git fetch origin main
+            git rebase -X theirs origin/main || git rebase --abort
+            git push
+          fi
+      - name: Bao dong du lieu qua han
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, io, datetime as dt, os, urllib.request
+          hom_nay = (dt.datetime.utcnow() + dt.timedelta(hours=7)).date()
+          tre = []
+          for f, ten, han in (("docs/data/sectors.json", "Chu ky nganh (RRG)", 4),
+                              ("docs/data/agri_cycle.json", "Chu ky chan nuoi", 4)):
+              try:
+                  d = json.load(io.open(f, encoding="utf-8"))
+                  ngay = dt.date.fromisoformat(d["date"])
+              except Exception as e:
+                  tre.append(f"**{ten}**: khong doc duoc ({e})"); continue
+              tuoi = (hom_nay - ngay).days
+              print(f"{ten}: {ngay} ({tuoi} ngay tuoi)")
+              if tuoi > han:
+                  tre.append(f"**{ten}** dung yen tu `{ngay}` ({tuoi} ngay)")
+          if tre:
+              # Cu bao loi im lang thi du lieu chet ma khong ai biet -- dung nhu
+              # sectors.json ket o 2026-09-07 suot 9 ngay.
+              noi_dung = ("⚠️ **hpa-cycle**: du lieu chu ky qua han — " + "; ".join(tre)
+                          + f"\n{os.environ['SV']}/{os.environ['REPO']}/actions/runs/{os.environ['RUN']}")
+              req = urllib.request.Request(
+                  os.environ["DISCORD_WEBHOOK_URL"],
+                  data=json.dumps({"username": "Bot CI", "content": noi_dung}).encode(),
+                  headers={"Content-Type": "application/json"})
+              try:
+                  urllib.request.urlopen(req, timeout=15)
+              except Exception as e:
+                  print("khong gui duoc Discord:", e)
+          PY
+        env:
+          SV: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+      - name: Bao loi ve Discord
+        if: failure() || cancelled()
+        run: |
+          curl -s -X POST -H "Content-Type: application/json" -d "{\"username\":\"Bot CI\",\"content\":\"❌ Workflow **${{ github.workflow }}** lỗi — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "$DISCORD_WEBHOOK_URL" || true

@@ -105,6 +105,11 @@ def main():
     if not should_run():
         log("bo qua (hom nay da tinh).")
         return
+    # Tran CUNG truoc `timeout-minutes: 2` cua buoc: Yahoo co timeout rieng 25s
+    # nhung stock_weekly() goi vnstock -- da do mot call treo toi 94s, ba ma treo
+    # la du chem ca job. Xem timebox.py.
+    from timebox import arm
+    arm(float(os.environ.get("CYCLE_DEADLINE_S", "100")), "cycle")
 
     try:
         hog = yahoo_weekly("HE=F")
