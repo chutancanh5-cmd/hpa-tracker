@@ -23,13 +23,14 @@ concurrency:
 jobs:
   cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 32
+    timeout-minutes: 40
     env:
       TZ: Asia/Ho_Chi_Minh
       VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       ACCEPT_TC: "tôi đồng ý"
-      SECTORS_DEADLINE_S: "1080"   # 18' -- tran MEM trong script
+      SECTORS_DEADLINE_S: "1560"   # 26' -- tran MEM. Do that 16/09: 20s/ma khi VCI
+                                   # cham, 78 ma => ~26'. Ngay thuong nhanh hon nhieu.
       CYCLE_DEADLINE_S: "300"      # 5'
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +71,7 @@ jobs:
       # tai, giu ban cu) -> tran cung updater/timebox.py (os._exit(0)) -> timeout cua
       # buoc. Chi lop ngoai cung moi lam job do, va no khong bao gio nen cham toi.
       - name: Chu ky nganh (RRG)
-        timeout-minutes: 20
+        timeout-minutes: 28
         continue-on-error: true
         run: python updater/update_sectors.py || true
       - name: Chu ky chan nuoi (co ban)
