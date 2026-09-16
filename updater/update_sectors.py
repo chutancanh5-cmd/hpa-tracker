@@ -39,6 +39,14 @@ PACE = 0.3           # giay nghi giua 2 lan tai lich su (vnstock_data paid Golde
 _START = time.monotonic()
 DEADLINE_S = float(os.environ.get("SECTORS_DEADLINE_S", "150"))
 
+# Quet thanh khoan toan bo 704 ma la phan dat nhat: do duoc 12 PHUT trong run
+# 35101511551 (16/09/2026, VCI cham + 1 lo timeout), an het quy thoi gian nen phan
+# tai lich su khong bao gio xong. Nhung "top 5 ma thanh khoan nhat moi nganh" doi
+# rat cham -- giu lai va dung lai trong PICKS_MAX_AGE ngay, chi quet lai khi het
+# han (hoac --rescan). Ngay thuong chi con ~85 loi goi lich su.
+CACHE_PICKS = os.path.join(HERE, ".sector_picks.json")
+PICKS_MAX_AGE = 7
+
 
 def over_budget():
     return time.monotonic() - _START > DEADLINE_S
@@ -182,6 +190,31 @@ def fetch_history(sym, start):
     return ser[~ser.index.duplicated(keep="last")]
 
 
+def doc_picks_cache():
+    """-> picks {(code,name): [sym]} neu cache con han, nguoc lai None."""
+    if "--rescan" in sys.argv:
+        return None
+    try:
+        d = json.load(open(CACHE_PICKS, encoding="utf-8"))
+        tuoi = (vn_now().date() - dt.date.fromisoformat(d["date"])).days
+        if tuoi > PICKS_MAX_AGE or not d.get("picks"):
+            return None
+        log(f"dung lai danh sach ma da chon ({tuoi} ngay tuoi) -> bo qua quet thanh khoan")
+        return {(p["code"], p["name"]): p["syms"] for p in d["picks"]}
+    except Exception:
+        return None
+
+
+def ghi_picks_cache(picks):
+    try:
+        json.dump({"date": vn_now().date().isoformat(),
+                   "picks": [{"code": c, "name": n, "syms": v}
+                             for (c, n), v in picks.items()]},
+                  open(CACHE_PICKS, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception as e:
+        log("khong ghi duoc cache picks:", describe_exc(e, 60))
+
+
 def main():
     if not should_run():
         log("bo qua (da co ban moi / chua het phien).")
@@ -196,25 +229,37 @@ def main():
 
     try:
         sym2ind, hpa_ind = fetch_universe()
-        liq, liq_failed = fetch_liquidity(sym2ind.keys())
     except Exception as e:
         log("khong lay duoc universe (rate limit?) -> giu ban cu:", describe_exc(e))
         return
-    if liq_failed:
-        log(f"CANH BAO: {liq_failed} lo price_board that bai -> thanh khoan thieu, "
-            f"co the mat nganh")
 
-    # chon top thanh khoan moi nganh
-    groups = {}
-    for s, (code, name) in sym2ind.items():
-        v = liq.get(s, 0)
-        if v >= MIN_VAL_BN:
-            groups.setdefault((code, name), []).append((v, s))
-    picks = {}
-    for k, lst in groups.items():
-        lst.sort(reverse=True)
-        if len(lst) >= 3:
-            picks[k] = [s for _, s in lst[:TOP_N]]
+    liq_failed = 0
+    picks = doc_picks_cache()
+    if picks is None:
+        try:
+            liq, liq_failed = fetch_liquidity(sym2ind.keys())
+        except Exception as e:
+            log("khong lay duoc thanh khoan (rate limit?) -> giu ban cu:", describe_exc(e))
+            return
+        if liq_failed:
+            log(f"CANH BAO: {liq_failed} lo price_board that bai -> thanh khoan thieu, "
+                f"co the mat nganh")
+
+        # chon top thanh khoan moi nganh
+        groups = {}
+        for s, (code, name) in sym2ind.items():
+            v = liq.get(s, 0)
+            if v >= MIN_VAL_BN:
+                groups.setdefault((code, name), []).append((v, s))
+        picks = {}
+        for k, lst in groups.items():
+            lst.sort(reverse=True)
+            if len(lst) >= 3:
+                picks[k] = [s for _, s in lst[:TOP_N]]
+        # Chi ghi cache khi quet SACH: mot lo price_board hong lam mat ca mot nganh,
+        # dong bang no lai 7 ngay thi con te hon.
+        if not liq_failed and len(picks) >= 12:
+            ghi_picks_cache(picks)
     log(f"{len(picks)} nganh du dieu kien (>=3 ma thanh khoan)")
 
     start = (vn_now().date() - dt.timedelta(days=HIST_DAYS)).isoformat()

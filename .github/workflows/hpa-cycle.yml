@@ -81,6 +81,9 @@ jobs:
         if: always()
         run: |
           git add docs/data/sectors.json docs/data/agri_cycle.json 2>/dev/null || true
+          # Runner checkout moi moi lan chay -> cache danh sach ma phai nam trong repo
+          # thi lan sau moi bo qua duoc 12 phut quet thanh khoan.
+          git add -f updater/.sector_picks.json 2>/dev/null || true
           if git diff --cached --quiet; then echo "khong co thay doi"; else
             git commit -m "cycle: chu ky nganh + chan nuoi $(date +%F)"
             git fetch origin main
